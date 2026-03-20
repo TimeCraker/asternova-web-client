@@ -1,6 +1,8 @@
 import axios, { AxiosError } from "axios"
 
-const API_BASE_URL = "http://127.0.0.1:8081/api/v1"
+// ===== 新增代码 START =====
+// 使用 Next.js 本地代理路径，避免直接访问 127.0.0.1:8081，彻底规避浏览器 Private Network / CORS 报错
+const API_BASE_URL = "/api/proxy"
 
 export const authApi = axios.create({
   baseURL: API_BASE_URL,
@@ -8,6 +10,7 @@ export const authApi = axios.create({
     "Content-Type": "application/json",
   },
 })
+// ===== 新增代码 END =====
 
 type ApiErrorBody = {
   error?: string

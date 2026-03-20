@@ -58,6 +58,8 @@ export const useGameStore = create<GameState>()(
       partialize: (state) => ({
         token: state.token,
         userId: state.userId,
+        selectedClass: state.selectedClass,
+        currentRoomId: state.currentRoomId,
       }),
     },
   ),

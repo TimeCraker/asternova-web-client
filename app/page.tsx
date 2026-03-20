@@ -1,65 +1,62 @@
-import Image from "next/image";
+"use client"
 
+import { useRouter } from "next/navigation"
+
+import { CinematicBlackHole } from "@/src/components/CinematicBlackHole"
+
+// ===== 新增代码 START =====
+// 主页蓝紫黑洞重构：倾斜 30° + 鼠标跟随 + 极简深空背景
 export default function Home() {
+  const router = useRouter()
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-transparent text-white">
+      <style>{`
+        .aster-title {
+          background: linear-gradient(120deg, rgba(56,189,248,0.95), rgba(168,85,247,0.95), rgba(99,102,241,0.95));
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+        }
+        .aster-slogan {
+          color: rgba(255,255,255,0.55);
+          text-shadow: 0 0 14px rgba(255,255,255,0.06);
+        }
+      `}</style>
+
+      {/* ===== 新增代码 START ===== */}
+      {/* 黑洞作为绝对背景：Three.js ShaderMaterial + Bloom 后期 */}
+      <CinematicBlackHole
+        interactive
+        intensity={1}
+        opacity={0.9}
+        className="pointer-events-none absolute inset-0"
+      />
+      {/* ===== 新增代码 END ===== */}
+
+      {/* 内容 */}
+      <div className="relative z-10 flex w-full max-w-4xl flex-col items-center px-6 text-center">
+        <div className="mt-[46vh] sm:mt-[48vh]" />
+
+        <h1 className="aster-title text-3xl font-semibold tracking-[0.22em] sm:text-4xl">ASTERNOVA STUDIO</h1>
+        <p className="aster-slogan mt-3 text-sm sm:text-base">Reach Beyond the Stars</p>
+
+        <div className="mt-8">
+          <button
+            type="button"
+            onClick={() => router.push("/login")}
+            className="group relative inline-flex items-center justify-center rounded-full bg-gradient-to-r from-cyan-300 via-violet-400 to-indigo-400 px-10 py-3 text-sm font-semibold text-black shadow-[0_0_44px_rgba(168,85,247,0.25)] transition duration-300 hover:scale-[1.03] hover:shadow-[0_0_70px_rgba(56,189,248,0.30)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <span className="relative z-10 flex items-center gap-2">
+              <span className="text-[0.95rem]">开始自由探索（登录Login）</span>
+              <span className="mt-[1px] text-xs opacity-80">↗</span>
+            </span>
+            <span className="pointer-events-none absolute inset-[1px] rounded-full bg-black/10 transition group-hover:bg-black/15" />
+            <span className="pointer-events-none absolute inset-0 rounded-full bg-[linear-gradient(120deg,rgba(255,255,255,0.0),rgba(255,255,255,0.32),rgba(255,255,255,0.0))] opacity-0 blur-[1px] transition duration-500 group-hover:opacity-100 group-hover:translate-x-1" />
+          </button>
         </div>
-      </main>
+      </div>
     </div>
-  );
+  )
 }
+// ===== 新增代码 END =====

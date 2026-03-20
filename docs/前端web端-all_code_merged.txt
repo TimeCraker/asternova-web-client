@@ -1,0 +1,2738 @@
+﻿
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\app\arena\page.tsx ---
+
+"use client"
+
+import * as React from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
+import { Orbitron } from "next/font/google"
+import { Unity, useUnityContext } from "react-unity-webgl"
+
+import { CinematicBlackHole } from "@/src/components/CinematicBlackHole"
+import { Button } from "@/components/ui/button"
+import { useGameStore } from "@/src/store/useGameStore"
+
+const orbitron = Orbitron({
+  subsets: ["latin"],
+  weight: ["400", "600", "700"],
+})
+
+type UnityBattleProps = {
+  router: ReturnType<typeof useRouter>
+  token: string
+  userId: number
+  currentRoomId: string
+  selectedClass: string
+  buildUrls: {
+    loaderUrl: string
+    dataUrl: string
+    frameworkUrl: string
+    codeUrl: string
+  }
+}
+
+function UnityBattle(props: UnityBattleProps) {
+  const { router, token, userId, currentRoomId, selectedClass, buildUrls } = props
+
+  const { loaderUrl, dataUrl, frameworkUrl, codeUrl } = buildUrls
+
+  const { unityProvider, isLoaded, loadingProgression, sendMessage } = useUnityContext({
+    loaderUrl,
+    dataUrl,
+    frameworkUrl,
+    codeUrl,
+  })
+
+  // ===== 新增代码 START =====
+  // 修改内容：前端跨端初始化单发锁，规避严格模式下重复注入
+  // 修改原因：React 18 Strict Mode 下 effect 可能触发重复调用
+  // 影响范围：仅 Unity EnterBattle 注入链路
+  const hasSentInitRef = React.useRef(false)
+  // ===== 新增代码 END =====
+  const percent = Math.max(0, Math.min(100, Math.round((loadingProgression ?? 0) * 100)))
+
+  // ===== 新增代码 START =====
+  // Unity 初始化观测：加载进度日志、WASM 实例化拦截、异常兜底与卡死提示
+  const [loadingText, setLoadingText] = React.useState("启动引擎中...")
+  const stuckTimerRef = React.useRef<number | null>(null)
+  const wasmPatchedRef = React.useRef(false)
+
+  React.useEffect(() => {
+    if (isLoaded) return
+    const seq = ["启动引擎中...", "构造场景中..."]
+    let idx = 0
+    setLoadingText(seq[0])
+    const t = window.setInterval(() => {
+      idx = (idx + 1) % seq.length
+      setLoadingText(seq[idx])
+    }, 1200)
+    return () => window.clearInterval(t)
+  }, [isLoaded])
+
+  React.useEffect(() => {
+    // 进度日志：用于诊断卡在 100% 的场景
+    // eslint-disable-next-line no-console
+    console.debug(
+      "[UnityWebGL] loadingProgression =",
+      loadingProgression,
+      "percent =",
+      percent,
+      "isLoaded =",
+      isLoaded,
+    )
+  }, [loadingProgression, percent, isLoaded])
+
+  React.useEffect(() => {
+    if (wasmPatchedRef.current) return
+    wasmPatchedRef.current = true
+
+    const w = window as unknown as {
+      WebAssembly?: typeof WebAssembly
+    }
+    if (!w.WebAssembly) return
+
+    const originalInstantiateStreaming = w.WebAssembly.instantiateStreaming?.bind(
+      w.WebAssembly,
+    ) as typeof WebAssembly.instantiateStreaming | undefined
+    const originalInstantiate = w.WebAssembly.instantiate?.bind(w.WebAssembly) as
+      | typeof WebAssembly.instantiate
+      | undefined
+
+    // 拦截 instantiateStreaming（通常用于 wasm）
+    if (originalInstantiateStreaming) {
+      w.WebAssembly.instantiateStreaming = (async (source, importObject) => {
+        try {
+          // eslint-disable-next-line no-console
+          console.debug("[UnityWebGL] WebAssembly.instantiateStreaming called", source)
+          const res = await originalInstantiateStreaming(
+            source as Parameters<typeof WebAssembly.instantiateStreaming>[0],
+            importObject as Parameters<typeof WebAssembly.instantiateStreaming>[1],
+          )
+          // eslint-disable-next-line no-console
+          console.debug("[UnityWebGL] WebAssembly.instantiateStreaming success")
+          return res
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error("[UnityWebGL] WebAssembly.instantiateStreaming failed", err)
+          throw err
+        }
+      }) as typeof WebAssembly.instantiateStreaming
+    }
+
+    // 拦截 instantiate（某些情况下会走这里）
+    if (originalInstantiate) {
+      w.WebAssembly.instantiate = (async (bufferSource, importObject) => {
+        const size =
+          bufferSource && typeof (bufferSource as ArrayBuffer).byteLength === "number"
+            ? (bufferSource as ArrayBuffer).byteLength
+            : undefined
+        try {
+          // eslint-disable-next-line no-console
+          console.debug("[UnityWebGL] WebAssembly.instantiate called", { size })
+          const res = await originalInstantiate(
+            bufferSource as Parameters<typeof WebAssembly.instantiate>[0],
+            importObject as Parameters<typeof WebAssembly.instantiate>[1],
+          )
+          // eslint-disable-next-line no-console
+          console.debug("[UnityWebGL] WebAssembly.instantiate success")
+          return res
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error("[UnityWebGL] WebAssembly.instantiate failed", err)
+          throw err
+        }
+      }) as typeof WebAssembly.instantiate
+    }
+
+    // 捕获全局异常（包含 wasm / unity loader 的异常）
+    const onError = (ev: Event) => {
+      // eslint-disable-next-line no-console
+      console.error("[UnityWebGL] window.error", ev)
+    }
+    const onRejection = (ev: PromiseRejectionEvent) => {
+      // eslint-disable-next-line no-console
+      console.error("[UnityWebGL] window.unhandledrejection", ev.reason)
+    }
+    window.addEventListener("error", onError)
+    window.addEventListener("unhandledrejection", onRejection)
+    return () => {
+      window.removeEventListener("error", onError)
+      window.removeEventListener("unhandledrejection", onRejection)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    // 兜底：如果进度 100% 但 15 秒内仍未进入画布（isLoaded=false），提示玩家清缓存/重启
+    if (isLoaded) {
+      if (stuckTimerRef.current) {
+        window.clearTimeout(stuckTimerRef.current)
+        stuckTimerRef.current = null
+      }
+      return
+    }
+
+    if (percent < 100) {
+      if (stuckTimerRef.current) {
+        window.clearTimeout(stuckTimerRef.current)
+        stuckTimerRef.current = null
+      }
+      return
+    }
+
+    if (stuckTimerRef.current) return
+    stuckTimerRef.current = window.setTimeout(() => {
+      if (!isLoaded) {
+        toast.error("Unity 引擎卡死，请尝试清理缓存或重启")
+      }
+      stuckTimerRef.current = null
+    }, 15000)
+
+    return () => {
+      if (stuckTimerRef.current) {
+        window.clearTimeout(stuckTimerRef.current)
+        stuckTimerRef.current = null
+      }
+    }
+  }, [percent, isLoaded])
+  // ===== 新增代码 END =====
+
+  React.useEffect(() => {
+    if (!isLoaded) return
+    if (hasSentInitRef.current) return
+    hasSentInitRef.current = true
+
+    if (!token || !userId || !currentRoomId || !selectedClass) {
+      toast.error("缺少进入战场所需数据，将返回大厅")
+      router.push("/lobby")
+      return
+    }
+
+    // ===== 新增代码 START =====
+    // 修改内容：改为 JSON 载荷，向 Unity 注入 battle ws 初始化参数
+    // 修改原因：Unity 端 BattleWsClient.EnterBattle 按 JSON 解析并执行 Protobuf WS 握手
+    // 影响范围：仅前端 -> Unity 的初始化消息格式
+    const battleWsBase = "ws://127.0.0.1:8081/ws"
+    const payload = JSON.stringify({
+      token,
+      userId,
+      roomId: currentRoomId,
+      selectedClass,
+      wsBase: battleWsBase,
+    })
+    // ===== 新增代码 END =====
+    try {
+      sendMessage("GameManager", "EnterBattle", payload)
+    } catch {
+      toast.error("跨端通信失败：无法向 Unity 注入战场参数")
+    }
+  }, [isLoaded, token, userId, currentRoomId, selectedClass, sendMessage, router])
+
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-transparent text-white">
+      <style>{`
+        @keyframes neonPulse {
+          0%, 100% { opacity: .55; transform: translateX(-25%); }
+          50% { opacity: 1; transform: translateX(25%); }
+        }
+        @keyframes scanline {
+          0% { transform: translateY(-120%); opacity: 0; }
+          12% { opacity: .65; }
+          100% { transform: translateY(120%); opacity: 0; }
+        }
+        @keyframes dataFlow {
+          0% { transform: translateX(-20%); opacity: .15; }
+          35% { opacity: .35; }
+          100% { transform: translateX(120%); opacity: 0; }
+        }
+        .cyberText {
+          background: linear-gradient(45deg, rgba(255,105,180,.95), #8E2DE2, rgba(0,229,255,.95));
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+        }
+      `}</style>
+
+      {/* ===== 新增代码 START ===== */}
+      {/* 修改内容：Unity 画布始终挂载在 DOM，未加载时仅用 opacity 隐藏，避免 display/hidden 导致引擎停摆 */}
+      <div
+        className={[
+          "absolute inset-0 h-full w-full transition-opacity duration-300",
+          isLoaded ? "opacity-100" : "opacity-0 pointer-events-none",
+        ].join(" ")}
+      >
+        <div className="absolute inset-0 h-full w-full">
+          <Unity
+            unityProvider={unityProvider}
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "block",
+              background: "transparent",
+            }}
+          />
+        </div>
+      </div>
+      {/* ===== 新增代码 END ===== */}
+
+      {isLoaded ? (
+        <div className="absolute left-4 top-4 z-20">
+          <Button
+            asChild
+            variant="secondary"
+            className="border border-white/12 bg-black/40 text-white backdrop-blur-md shadow-[0_0_0_1px_rgba(255,255,255,0.06)] hover:bg-black/55 hover:shadow-[0_0_0_1px_rgba(0,229,255,0.18),0_0_24px_rgba(142,45,226,0.14)]"
+          >
+            <Link href="/lobby">紧急撤离（返回大厅）</Link>
+          </Button>
+        </div>
+      ) : null}
+
+      {!isLoaded ? (
+        <div className="relative z-50 flex h-full w-full items-center justify-center">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/15 via-black/45 to-black/80" />
+          {/* 中央 HUD */}
+          <div className="relative z-50 w-full max-w-2xl px-6">
+            <div className="mx-auto rounded-2xl border border-white/10 bg-black/45 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_0_90px_rgba(142,45,226,0.14)] backdrop-blur">
+              <div className={[orbitron.className, "text-center"].join(" ")}>
+                <div className="text-xs tracking-[0.35em] text-white/50">ASTER NOVA</div>
+                <div
+                  className={[
+                    "mt-3 text-2xl font-semibold tracking-tight cyberText",
+                    "drop-shadow-[0_0_18px_rgba(142,45,226,0.20)]",
+                  ].join(" ")}
+                >
+                  {/* ===== 新增代码 START ===== */}
+                  ASTERONA 核心引擎启动中… <span className="ml-2 text-white/70">{loadingText}</span>
+                  {/* ===== 新增代码 END ===== */}
+                </div>
+
+                <div className="mt-6 text-sm text-white/65">正在注入运行时数据流，请稍候</div>
+
+                <div className="mt-7">
+                  <div className="mb-3 flex items-center justify-center gap-3">
+                    <div className="h-px w-12 bg-white/10" />
+                    <div className={[orbitron.className, "cyberText text-lg font-bold tabular-nums"].join(" ")}>
+                      {percent}%
+                    </div>
+                    <div className="h-px w-12 bg-white/10" />
+                  </div>
+
+                  {/* 刻度线 */}
+                  <div className="relative mx-auto max-w-xl">
+                    <div className="mb-2 flex items-center justify-between px-1">
+                      {Array.from({ length: 13 }).map((_, i) => (
+                        <span
+                          key={i}
+                          className={[
+                            "inline-block w-[1px]",
+                            i % 3 === 0 ? "h-3 bg-white/22" : "h-2 bg-white/12",
+                          ].join(" ")}
+                          style={{ opacity: i === 0 || i === 12 ? 0.35 : 0.55 }}
+                        />
+                      ))}
+                    </div>
+
+                    {/* 进度条轨道 */}
+                    <div className="relative h-5 overflow-hidden rounded-full border border-white/10 bg-white/5 shadow-inner">
+                      {/* 扫描线 */}
+                      <div
+                        className="pointer-events-none absolute inset-x-0 top-0 h-10"
+                        style={{
+                          background:
+                            "linear-gradient(180deg, rgba(0,229,255,0) 0%, rgba(0,229,255,0.18) 30%, rgba(255,105,180,0.0) 100%)",
+                          animation: "scanline 1.9s ease-in-out infinite",
+                        }}
+                      />
+
+                      {/* 数据流粒子 */}
+                      <div
+                        className="pointer-events-none absolute left-0 top-1/2 h-2 w-24 -translate-y-1/2 rounded-full blur-sm"
+                        style={{
+                          background:
+                            "linear-gradient(90deg, rgba(255,105,180,0), rgba(142,45,226,0.65), rgba(0,229,255,0))",
+                          animation: "dataFlow 1.15s linear infinite",
+                        }}
+                      />
+
+                      {/* 填充条 */}
+                      <div
+                        className="relative h-full rounded-full"
+                        style={{
+                          width: `${percent}%`,
+                          background:
+                            "linear-gradient(90deg, rgba(255,105,180,0.95), #8E2DE2, rgba(0,229,255,0.95))",
+                          boxShadow:
+                            "0 0 0 1px rgba(255,255,255,0.10), 0 0 22px rgba(142,45,226,0.35), 0 0 30px rgba(0,229,255,0.18)",
+                        }}
+                      >
+                        {/* 脉冲光效（沿进度段轻微游走） */}
+                        <div
+                          className="pointer-events-none absolute inset-y-0 left-0 w-2/3 rounded-full blur-md"
+                          style={{
+                            background:
+                              "linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.30), rgba(255,255,255,0))",
+                            animation: "neonPulse 1.05s ease-in-out infinite",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 资源缺失兜底提示 */}
+                  <div className="mt-6 rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-left text-xs text-white/65">
+                    <div className="mb-1 text-white/80">Unity Build 资源检查</div>
+                    <div className="font-mono text-white/60">
+                      loader: {loaderUrl}
+                      <br />
+                      data: {dataUrl}
+                      <br />
+                      framework: {frameworkUrl}
+                      <br />
+                      wasm: {codeUrl}
+                    </div>
+                    <div className="mt-2 text-white/55">
+                      若一直卡在加载：请把 Unity WebGL 导出的{" "}
+                      <span className="font-mono text-white/70">Build.data / Build.framework.js / Build.wasm</span>（或对应的{" "}
+                      <span className="font-mono text-white/70">.unityweb</span>）补齐到{" "}
+                      <span className="font-mono text-white/70">public/unity/Build/</span>。
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-center">
+                <Button asChild className="bg-white/10 text-white hover:bg-white/15">
+                  <Link href="/lobby">返回大厅</Link>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+export default function ArenaPage() {
+  const router = useRouter()
+
+  const token = useGameStore((s) => s.token)
+  const userId = useGameStore((s) => s.userId)
+  const currentRoomId = useGameStore((s) => s.currentRoomId)
+  const selectedClass = useGameStore((s) => s.selectedClass)
+  // ===== 新增代码 START =====
+  // 修改内容：在首帧即识别是否为浏览器刷新导航
+  // 修改原因：避免刷新场景下先挂载 Unity 再异步跳转，造成误入战场
+  // 影响范围：arena 页面入口守卫
+  const isReloadNavigation = React.useMemo(() => {
+    if (typeof window === "undefined") return false
+    const navEntry = window.performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined
+    return navEntry?.type === "reload"
+  }, [])
+  // ===== 新增代码 END =====
+  // ===== 新增代码 START =====
+  // 修改内容：战场准入硬校验（刷新即丢内存态，直接视为掉线）
+  // 修改原因：业务规则要求不做刷新重连，不允许 sessionStorage 恢复房间态
+  // 影响范围：仅 arena 路由入口渲染守卫
+  const canEnterArena = Boolean(token && userId && currentRoomId) && !isReloadNavigation
+  // ===== 新增代码 END =====
+
+  // ===== 新增代码 START =====
+  // 修改内容：检测浏览器刷新行为，刷新即判负并清空关键状态
+  // 修改原因：业务规则明确不支持刷新重连
+  // 影响范围：arena 路由入口守卫
+  React.useEffect(() => {
+    if (isReloadNavigation) {
+      const state = useGameStore.getState()
+      state.clearAuth()
+      state.setCurrentRoomId("")
+      toast.error("检测到刷新：判定掉线，已返回大厅")
+      router.replace("/lobby")
+    }
+  }, [isReloadNavigation, router])
+  // ===== 新增代码 END =====
+
+  // ===== 新增代码 START =====
+  // 路由守卫：未登录直接访问战场时，强制跳转登录页
+  React.useEffect(() => {
+    if (!canEnterArena) {
+      toast.error("战场会话已失效，请重新进入房间")
+      router.replace("/lobby")
+    }
+  }, [canEnterArena, router])
+  // ===== 新增代码 END =====
+
+  // ===== 新增代码 START =====
+  // 修改内容：监听 Unity 回传的战斗结算事件，由前端主导弹提示并跳回大厅
+  // 修改原因：对手掉线/判负消息由 Unity 解析后回传前端，完成业务闭环
+  // 影响范围：arena 页面事件监听
+  React.useEffect(() => {
+    const onBattleResult = (event: Event) => {
+      const customEvent = event as CustomEvent<{ resultType?: string }>
+      const resultType = customEvent?.detail?.resultType ?? ""
+      if (resultType === "win" || resultType === "victory" || resultType === "opponent_left") {
+        toast.success("对局结束：对手离线，你已获胜")
+      } else if (resultType) {
+        toast.info(`对局结束：${resultType}`)
+      } else {
+        toast.info("对局结束")
+      }
+      router.replace("/lobby")
+    }
+    window.addEventListener("unity:battle_result", onBattleResult)
+    return () => window.removeEventListener("unity:battle_result", onBattleResult)
+  }, [router])
+  // ===== 新增代码 END =====
+
+  // ===== 新增代码 START =====
+  // 修改原因：将隐藏在 Console 的异常直接展示在 UI 顶层，便于定位 Unity/WebGL 的 silent error
+  const [errorLog, setErrorLog] = React.useState<string[]>([])
+
+  React.useEffect(() => {
+    const push = (msg: string) => {
+      setErrorLog((prev) => {
+        const next = [...prev, msg]
+        return next.slice(-30)
+      })
+    }
+
+    const onErrorEvent = (event: ErrorEvent) => {
+      const message = event.message || event.type || "UnknownError"
+      const extra = event.filename ? ` @ ${event.filename}:${event.lineno ?? "?"}:${event.colno ?? "?"}` : ""
+      const stack = event.error instanceof Error ? event.error.stack : undefined
+      push(`[window.onerror] ${message}${extra}${stack ? `\n${stack}` : ""}`)
+    }
+
+    const onUnhandledRejection = (ev: PromiseRejectionEvent) => {
+      const reason = ev?.reason
+      const msg =
+        reason instanceof Error
+          ? `${reason.name}: ${reason.message}\n${reason.stack ?? ""}`
+          : typeof reason === "string"
+            ? reason
+            : JSON.stringify(reason)
+      push(`[unhandledrejection] ${msg}`)
+    }
+
+    window.addEventListener("error", onErrorEvent)
+    window.addEventListener("unhandledrejection", onUnhandledRejection)
+    return () => {
+      window.removeEventListener("error", onErrorEvent)
+      window.removeEventListener("unhandledrejection", onUnhandledRejection)
+    }
+  }, [])
+
+  // Unity loader 预检：避免玩家卡在 0%（典型原因：Build.loader.js 404 被吞）
+  const [loaderCheckState, setLoaderCheckState] = React.useState<"checking" | "ok" | "not_found">("checking")
+  const [resolvedBuildUrls, setResolvedBuildUrls] = React.useState<{
+    loaderUrl: string
+    dataUrl: string
+    frameworkUrl: string
+    codeUrl: string
+  } | null>(null)
+  const [precheckLoadingText, setPrecheckLoadingText] = React.useState("启动引擎中...")
+
+  React.useEffect(() => {
+    let cancelled = false
+    const controller = new AbortController()
+
+    const run = async () => {
+      try {
+        // ===== 新增代码 START =====
+        // 修改原因：彻底抛弃 .gz，探活未压缩文件是否存在
+        const buildBase = "/unity/Build"
+        const candidates = [
+          {
+            loaderUrl: `${buildBase}/Build.loader.js`,
+            dataUrl: `${buildBase}/Build.data`,
+            frameworkUrl: `${buildBase}/Build.framework.js`,
+            codeUrl: `${buildBase}/Build.wasm`,
+          },
+          {
+            loaderUrl: `${buildBase}/Build.loader.js`,
+            dataUrl: `${buildBase}/Build.data.unityweb`,
+            frameworkUrl: `${buildBase}/Build.framework.js.unityweb`,
+            codeUrl: `${buildBase}/Build.wasm.unityweb`,
+          },
+        ]
+
+        for (const candidate of candidates) {
+          const required = [candidate.loaderUrl, candidate.dataUrl, candidate.frameworkUrl, candidate.codeUrl]
+          let allOk = true
+          for (const url of required) {
+            const res = await fetch(url, { method: "HEAD", signal: controller.signal })
+            if (cancelled) return
+            if (res.status === 404) {
+              allOk = false
+              break
+            }
+          }
+          if (allOk) {
+            setResolvedBuildUrls(candidate)
+            setLoaderCheckState("ok")
+            return
+          }
+        }
+        setLoaderCheckState("not_found")
+        // ===== 新增代码 END =====
+      } catch {
+        // 若网络异常/被拦截，仍允许继续走 Unity 初始化逻辑（由 Unity 自身兜底提示）
+        if (!cancelled) setLoaderCheckState("ok")
+      }
+    }
+
+    run()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (loaderCheckState === "ok" || loaderCheckState === "not_found") return
+    const seq = ["启动引擎中...", "构造场景中..."]
+    let idx = 0
+    setPrecheckLoadingText(seq[0])
+    const t = window.setInterval(() => {
+      idx = (idx + 1) % seq.length
+      setPrecheckLoadingText(seq[idx])
+    }, 1200)
+    return () => window.clearInterval(t)
+  }, [loaderCheckState])
+  // ===== 新增代码 END =====
+
+  // ===== 新增代码 START =====
+  // 修改内容：守卫失败时立即停止后续渲染，确保 Unity 不会被挂载
+  // 修改原因：防止刷新后进入单机态
+  // 影响范围：arena 页面渲染出口
+  if (!canEnterArena) {
+    return null
+  }
+  // ===== 新增代码 END =====
+
+  if (loaderCheckState === "not_found") {
+    return (
+      <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
+        {/* ===== 新增代码 START ===== */}
+        {errorLog.length ? (
+          <div className="fixed left-0 right-0 top-0 z-50 max-h-[45vh] overflow-auto bg-red-500/20 p-3">
+            <div className="rounded-lg bg-white p-3">
+              <div className="mb-2 text-sm font-semibold text-red-600">Runtime Errors</div>
+              <pre className="whitespace-pre-wrap break-words text-xs text-red-700">
+                {errorLog.join("\n\n---\n\n")}
+              </pre>
+            </div>
+          </div>
+        ) : null}
+        {/* ===== 新增代码 END ===== */}
+
+        <CinematicBlackHole interactive={false} intensity={0.9} opacity={0.22} className="pointer-events-none absolute inset-0" />
+        <div className="relative z-10 flex h-full w-full items-center justify-center p-6">
+          <div
+            className={[
+              orbitron.className,
+              "w-full max-w-2xl rounded-2xl border border-red-400/30 bg-red-950/40 p-8 shadow-[0_0_120px_rgba(255,0,0,0.18)] backdrop-blur",
+            ].join(" ")}
+          >
+            <div className="text-center text-2xl font-semibold text-red-200">❌ 严重错误</div>
+            <div className="mt-4 text-center text-sm text-red-100/80">
+              ❌ 找不到解压后的 Unity 文件！请在 Unity 中禁用 Compression Format 并重新 Build！
+            </div>
+            <div className="mt-6 flex justify-center">
+              <Button asChild className="bg-white/10 text-white hover:bg-white/15">
+                <Link href="/lobby">返回大厅</Link>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
+      {/* ===== 新增代码 START ===== */}
+      {errorLog.length ? (
+        <div className="fixed left-0 right-0 top-0 z-50 max-h-[45vh] overflow-auto bg-red-500/20 p-3">
+          <div className="rounded-lg bg-white p-3">
+            <div className="mb-2 text-sm font-semibold text-red-600">Runtime Errors</div>
+            <pre className="whitespace-pre-wrap break-words text-xs text-red-700">{errorLog.join("\n\n---\n\n")}</pre>
+          </div>
+        </div>
+      ) : null}
+      {/* ===== 新增代码 END ===== */}
+
+      <CinematicBlackHole interactive={false} intensity={0.95} opacity={0.3} className="pointer-events-none absolute inset-0" />
+      {loaderCheckState === "ok" ? (
+        resolvedBuildUrls ? (
+          <UnityBattle
+            router={router}
+            token={token}
+            userId={userId}
+            currentRoomId={currentRoomId}
+            selectedClass={selectedClass}
+            buildUrls={resolvedBuildUrls}
+          />
+        ) : null
+      ) : (
+        <div className="relative z-10 flex h-full w-full items-center justify-center">
+          <div className="w-full max-w-2xl px-6">
+            <div className="mx-auto rounded-2xl border border-white/10 bg-black/45 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_0_90px_rgba(142,45,226,0.14)] backdrop-blur">
+              <div className={[orbitron.className, "text-center"].join(" ")}>
+                <div className="text-xs tracking-[0.35em] text-white/50">ASTER NOVA</div>
+                <div className="mt-3 text-2xl font-semibold tracking-tight text-cyan-100 drop-shadow-[0_0_18px_rgba(142,45,226,0.20)]">
+                  启动预检中… <span className="ml-2 text-white/70">{precheckLoadingText}</span>
+                </div>
+                <div className="mt-4 text-sm text-white/65">正在探测 Unity loader 资源是否可访问</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\app\lobby\page.tsx ---
+
+"use client"
+
+import * as React from "react"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { useGameStore } from "@/src/store/useGameStore"
+
+type RoleOption = {
+  id: string
+  name: string
+  tagline: string
+  highlights: string[]
+  accentClassName: string
+}
+
+const ROLES: RoleOption[] = [
+  {
+    id: "Role1_Speedster",
+    name: "极速者",
+    tagline: "光速突进，先手压制",
+    highlights: ["高机动", "强突袭", "灵活走位"],
+    accentClassName: "from-cyan-400/20 via-sky-400/10 to-transparent",
+  },
+  {
+    id: "Role2_Cursemancer",
+    name: "诅咒师",
+    tagline: "侵蚀心智，持续消耗",
+    highlights: ["减益叠加", "控场", "反制爆发"],
+    accentClassName: "from-violet-400/20 via-fuchsia-400/10 to-transparent",
+  },
+  {
+    id: "Role3_Reviver",
+    name: "复苏者",
+    tagline: "逆转战局，守护同伴",
+    highlights: ["治疗增益", "续航", "节奏掌控"],
+    accentClassName: "from-emerald-400/18 via-green-400/10 to-transparent",
+  },
+  {
+    id: "Role4_Bulwark",
+    name: "重装卫士",
+    tagline: "坚壁不摧，正面推进",
+    highlights: ["高防御", "嘲讽牵制", "阵地战"],
+    accentClassName: "from-amber-400/18 via-orange-400/10 to-transparent",
+  },
+]
+
+export default function LobbyPage() {
+  const router = useRouter()
+
+  const username = useGameStore((s) => s.username)
+  const token = useGameStore((s) => s.token)
+  const userId = useGameStore((s) => s.userId)
+
+  const selectedClass = useGameStore((s) => s.selectedClass)
+  const setSelectedClass = useGameStore((s) => s.setSelectedClass)
+
+  const setCurrentRoomId = useGameStore((s) => s.setCurrentRoomId)
+
+  const wsRef = React.useRef<WebSocket | null>(null)
+  const matchingTimeoutRef = React.useRef<number | null>(null)
+  const [matching, setMatching] = React.useState(false)
+  // ===== 新增代码 START =====
+  // 右侧 Edius 风格列表：用于滚动定位当前选中的职业
+  const roleItemRefs = React.useRef<Record<string, HTMLButtonElement | null>>({})
+  const selectedRole = React.useMemo(() => ROLES.find((r) => r.id === selectedClass) || ROLES[0], [selectedClass])
+  // ===== 新增代码 END =====
+
+  // ===== 新增代码 START =====
+  // 路由守卫：未登录用户访问大厅时强制跳转到登录页并提示
+  React.useEffect(() => {
+    if (!token || !userId) {
+      toast.error("请先登录")
+      router.replace("/login")
+    }
+  }, [token, userId, router])
+  // ===== 新增代码 END =====
+
+  React.useEffect(() => {
+    return () => {
+      if (matchingTimeoutRef.current) {
+        window.clearTimeout(matchingTimeoutRef.current)
+      }
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close()
+      }
+      wsRef.current = null
+    }
+  }, [])
+
+  function connectAndMatch() {
+    if (matching) return
+    if (!token) {
+      toast.error("缺少 token，请先登录")
+      router.push("/login")
+      return
+    }
+    if (!userId) {
+      toast.error("缺少 userId，请重新登录")
+      router.push("/login")
+      return
+    }
+
+    setMatching(true)
+
+    const ws = new WebSocket(`ws://127.0.0.1:8081/ws?token=${encodeURIComponent(token)}`)
+    wsRef.current = ws
+
+    ws.onopen = () => {
+      try {
+        ws.send(JSON.stringify({ type: "match_req", user_id: userId }))
+      } catch {
+        toast.error("发起匹配失败：消息发送异常")
+        setMatching(false)
+        ws.close()
+      }
+    }
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(String(ev.data ?? "")) as { type?: string; room_id?: string }
+        if (msg?.type === "match_success" && typeof msg.room_id === "string" && msg.room_id) {
+          setCurrentRoomId(msg.room_id)
+          toast.success("匹配成功！正在建立战场链接...")
+          // 不在这里手动 close，交给路由切换后的 cleanup 自然释放，避免“刚匹配就断链”误判
+
+          matchingTimeoutRef.current = window.setTimeout(() => {
+            router.push("/arena")
+          }, 1500)
+        }
+      } catch {
+        // ignore non-json messages
+      }
+    }
+
+    ws.onerror = () => {
+      toast.error("匹配连接失败，请稍后重试")
+      setMatching(false)
+      try {
+        ws.close()
+      } catch {
+        // ignore
+      }
+    }
+
+    ws.onclose = (ev) => {
+      // eslint-disable-next-line no-console
+      console.debug("[LobbyWS] closed", {
+        code: ev.code,
+        reason: ev.reason,
+        wasClean: ev.wasClean,
+      })
+      wsRef.current = null
+      setMatching(false)
+    }
+  }
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-black text-white">
+      <div className="pointer-events-none absolute inset-0 opacity-80">
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:48px_48px] [mask-image:radial-gradient(circle_at_20%_25%,black,transparent_65%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_25%,rgba(56,189,248,0.18),transparent_45%),radial-gradient(circle_at_85%_25%,rgba(168,85,247,0.16),transparent_55%),radial-gradient(circle_at_70%_80%,rgba(34,197,94,0.10),transparent_55%)]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/70 to-black" />
+      </div>
+
+      {/* ===== 新增代码 START ===== */}
+      {/* Edius 风大厅：右侧为职业列表，主屏动态展示选中职业信息与动画占位 */}
+      <div className="relative mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 gap-8 px-6 py-10 md:grid-cols-[1.6fr_0.9fr]">
+        {/* 主屏：角色信息与动画占位 */}
+        <section className="flex flex-col gap-5">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <div className="text-xs tracking-widest text-white/50">ASTER NOVA LOBBY</div>
+              <div className="mt-2 text-3xl font-semibold tracking-tight">
+                Welcome, <span className="text-cyan-200">{username || "Anonymous"}</span>
+              </div>
+              <div className="mt-2 text-sm text-white/55">Reach Beyond the Stars</div>
+            </div>
+            <div className="text-xs text-white/40">右侧滚动选择职业</div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+            <Card className="border-white/10 bg-black/55 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_0_80px_rgba(56,189,248,0.08)] backdrop-blur">
+              <CardHeader>
+                <CardTitle className="text-lg">角色详细数据 HUD</CardTitle>
+                <CardDescription className="text-white/65">
+                  根据右侧选中职业，实时切换属性展示与战术要点。
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                  <span className="text-white/60">UserId</span>
+                  <span className="font-mono text-white/85">{userId || "-"}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                  <span className="text-white/60">Selected</span>
+                  <span className="font-mono text-white/85">{selectedRole?.id}</span>
+                </div>
+                <div className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                  <div className="text-xs text-white/55">职业</div>
+                  <div className="mt-1 text-base font-semibold">{selectedRole?.name}</div>
+                  <div className="mt-1 text-sm text-white/65">{selectedRole?.tagline}</div>
+                </div>
+                <ul className="mt-3 space-y-1.5 text-sm text-white/75">
+                  {selectedRole?.highlights.map((h) => (
+                    <li key={h} className="flex items-center gap-2">
+                      <span className="inline-block size-1.5 rounded-full bg-white/30" />
+                      <span>{h}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+
+            {/* 角色动画占位 */}
+            <Card className="relative overflow-hidden border-white/10 bg-black/45 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_0_120px_rgba(168,85,247,0.10)] backdrop-blur">
+              <style>{`
+                @keyframes ediusScan {
+                  0% { transform: translateY(-120%); opacity: 0; }
+                  14% { opacity: .55; }
+                  100% { transform: translateY(120%); opacity: 0; }
+                }
+                @keyframes ediusFlow {
+                  0% { transform: translateX(-30%); opacity: .18; }
+                  40% { opacity: .35; }
+                  100% { transform: translateX(130%); opacity: 0; }
+                }
+              `}</style>
+              <div className={["pointer-events-none absolute inset-0 bg-gradient-to-br", selectedRole?.accentClassName || ""].join(" ")} />
+              <div className="pointer-events-none absolute inset-0 opacity-35 bg-[linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:52px_52px]" />
+              <div
+                className="pointer-events-none absolute inset-x-0 top-0 h-16"
+                style={{
+                  background:
+                    "linear-gradient(180deg, rgba(56,189,248,0) 0%, rgba(56,189,248,0.18) 35%, rgba(168,85,247,0.0) 100%)",
+                  animation: "ediusScan 1.9s ease-in-out infinite",
+                }}
+              />
+              <div
+                className="pointer-events-none absolute left-0 top-1/2 h-2 w-28 -translate-y-1/2 rounded-full blur-sm"
+                style={{
+                  background:
+                    "linear-gradient(90deg, rgba(56,189,248,0), rgba(168,85,247,0.65), rgba(99,102,241,0))",
+                  animation: "ediusFlow 1.15s linear infinite",
+                }}
+              />
+              <CardHeader className="relative">
+                <CardTitle className="text-lg">角色 3D / 多帧插画动画（占位）</CardTitle>
+                <CardDescription className="text-white/65">
+                  后续将接入多帧插画/骨骼动画资源。当前仅保留展示结构。
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="relative">
+                <div className="flex h-[380px] flex-col items-center justify-center gap-3 rounded-xl border border-white/10 bg-black/40 px-4 text-center">
+                  <div className="text-xs tracking-[0.35em] text-white/45">3D / FRAMES</div>
+                  <div>
+                    <div className="mt-2 text-2xl font-semibold">{selectedRole?.name}</div>
+                    <div className="mt-2 text-sm text-white/60">占位容器：等待角色模型 / 多帧插画接入</div>
+                  </div>
+                  <div className="mt-2 h-px w-full max-w-[280px] bg-white/10" />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+
+        {/* 右侧：Edius 风格职业列表 */}
+        <aside className="flex flex-col gap-4">
+          <Card className="border-white/10 bg-black/55 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_0_90px_rgba(56,189,248,0.08)] backdrop-blur">
+            <CardHeader>
+              <CardTitle className="text-lg">职业列表</CardTitle>
+              <CardDescription className="text-white/60">滚动/点击切换职业</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1 scroll-smooth [scrollbar-width:thin] snap-y snap-mandatory">
+                {ROLES.map((role) => {
+                  const active = selectedClass === role.id
+                  return (
+                    <button
+                      key={role.id}
+                      type="button"
+                      ref={(el) => {
+                        roleItemRefs.current[role.id] = el
+                      }}
+                      onClick={() => {
+                        setSelectedClass(role.id)
+                        const el = roleItemRefs.current[role.id]
+                        if (el) {
+                          try {
+                            el.scrollIntoView({ block: "center", behavior: "smooth" })
+                          } catch {
+                            // ignore
+                          }
+                        }
+                      }}
+                      className={[
+                        "group relative w-full rounded-xl border px-3 py-3 text-left transition",
+                        "bg-black/35 hover:bg-black/45",
+                        "snap-center",
+                        active
+                          ? "border-cyan-300/30 shadow-[0_0_0_1px_rgba(34,211,238,0.20),0_0_44px_rgba(168,85,247,0.12)]"
+                          : "border-white/10",
+                      ].join(" ")}
+                    >
+                      <div className={["pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-br opacity-70", role.accentClassName].join(" ")} />
+                      <div className="relative flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold">{role.name}</div>
+                          <div className="mt-1 text-xs text-white/60">{role.tagline}</div>
+                        </div>
+                        <div
+                          className={[
+                            "shrink-0 rounded-full border px-2 py-0.5 text-xs",
+                            active ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100" : "border-white/10 bg-white/5 text-white/55",
+                          ].join(" ")}
+                        >
+                          {active ? "已选中" : "选择"}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
+      </div>
+      {/* ===== 新增代码 END ===== */}
+
+      <div className="fixed right-6 bottom-6 z-20">
+        <Button
+          type="button"
+          size="lg"
+          disabled={matching}
+          onClick={connectAndMatch}
+          className={[
+            "relative h-14 px-8 text-base font-semibold text-black",
+            "bg-cyan-300 hover:bg-cyan-200",
+            "shadow-[0_0_0_1px_rgba(34,211,238,0.25),0_12px_40px_rgba(34,211,238,0.18)]",
+            "before:absolute before:inset-0 before:rounded-lg before:bg-[conic-gradient(from_180deg_at_50%_50%,rgba(34,211,238,0.0),rgba(34,211,238,0.35),rgba(168,85,247,0.25),rgba(34,211,238,0.0))] before:opacity-60 before:blur-xl before:content-['']",
+            matching ? "cursor-not-allowed" : "animate-[pulse_2.4s_ease-in-out_infinite]",
+          ].join(" ")}
+        >
+          <span className="relative flex items-center gap-2">
+            {matching ? (
+              <>
+                <span className="inline-block size-4 animate-spin rounded-full border-2 border-black/25 border-t-black" />
+                <span>寻找对手中...</span>
+              </>
+            ) : (
+              <span>匹配对战</span>
+            )}
+          </span>
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\app\login\page.tsx ---
+
+"use client"
+
+import * as React from "react"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Button } from "@/components/ui/button"
+
+import { getApiErrorMessage, login, register, sendCode } from "@/src/api/auth"
+import { extractUserIdFromToken } from "@/src/api/jwt"
+import { useGameStore } from "@/src/store/useGameStore"
+import { BluePurpleBlackhole } from "@/src/components/bluePurpleBlackhole"
+
+export default function LoginPage() {
+  const router = useRouter()
+
+  const setToken = useGameStore((s) => s.setToken)
+  const setUserId = useGameStore((s) => s.setUserId)
+  const setUsername = useGameStore((s) => s.setUsername)
+
+  const [activeTab, setActiveTab] = React.useState<"login" | "register">("login")
+
+  const [loginUsername, setLoginUsername] = React.useState("")
+  const [loginPassword, setLoginPassword] = React.useState("")
+  const [loginSubmitting, setLoginSubmitting] = React.useState(false)
+
+  const [regUsername, setRegUsername] = React.useState("")
+  const [regPassword, setRegPassword] = React.useState("")
+  const [regEmail, setRegEmail] = React.useState("")
+  const [regCode, setRegCode] = React.useState("")
+  const [codeSending, setCodeSending] = React.useState(false)
+  const [regSubmitting, setRegSubmitting] = React.useState(false)
+
+  // ===== 新增代码 START =====
+  // 登录/注册表单前端校验：用户名长度与密码复杂度
+  function validateUsername(name: string): string | null {
+    if (!name) {
+      return "用户名不能为空"
+    }
+    if (name.length > 10) {
+      return "用户名长度不能超过 10 位"
+    }
+    return null
+  }
+
+  function validatePassword(pwd: string): string | null {
+    if (!pwd) {
+      return "密码不能为空"
+    }
+    const re = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{6,20}$/
+    if (!re.test(pwd)) {
+      return "密码需为 6-20 位字母+数字组合"
+    }
+    return null
+  }
+  // ===== 新增代码 END =====
+
+  async function onSubmitLogin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!loginUsername || !loginPassword) {
+      toast.error("请输入用户名与密码")
+      return
+    }
+
+    // ===== 新增代码 START =====
+    const usernameErr = validateUsername(loginUsername)
+    if (usernameErr) {
+      toast.error(usernameErr)
+      return
+    }
+    const passwordErr = validatePassword(loginPassword)
+    if (passwordErr) {
+      toast.error(passwordErr)
+      return
+    }
+    // ===== 新增代码 END =====
+
+    setLoginSubmitting(true)
+    try {
+      const res = await login(loginUsername, loginPassword)
+      const userId = extractUserIdFromToken(res.token)
+
+      setToken(res.token)
+      setUserId(userId)
+      setUsername(loginUsername)
+
+      toast.success("登录成功")
+      router.push("/lobby")
+    } catch (err) {
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setLoginSubmitting(false)
+    }
+  }
+
+  async function onSendCode() {
+    if (!regEmail) {
+      toast.error("请先填写邮箱")
+      return
+    }
+    setCodeSending(true)
+    try {
+      const res = await sendCode(regEmail)
+      toast.success(res.message || "验证码已发送")
+    } catch (err) {
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setCodeSending(false)
+    }
+  }
+
+  async function onSubmitRegister(e: React.FormEvent) {
+    e.preventDefault()
+    if (!regUsername || !regPassword || !regEmail || !regCode) {
+      toast.error("请完整填写注册信息")
+      return
+    }
+
+    // ===== 新增代码 START =====
+    const regUsernameErr = validateUsername(regUsername)
+    if (regUsernameErr) {
+      toast.error(regUsernameErr)
+      return
+    }
+    const regPasswordErr = validatePassword(regPassword)
+    if (regPasswordErr) {
+      toast.error(regPasswordErr)
+      return
+    }
+    // ===== 新增代码 END =====
+
+    setRegSubmitting(true)
+    try {
+      const res = await register(regUsername, regPassword, regEmail, regCode)
+      toast.success(res.message || "注册成功")
+      setActiveTab("login")
+      setLoginUsername(regUsername)
+      setLoginPassword("")
+    } catch (err) {
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setRegSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-transparent">
+      {/* ===== 新增代码 START ===== */}
+      {/* 主页同款蓝紫黑洞动效：作为登录页底层背景（保持原布局） */}
+      <BluePurpleBlackhole className="pointer-events-none absolute inset-0 opacity-30" intensity={0.8} interactive={false} />
+      {/* ===== 新增代码 END ===== */}
+
+      <div className="pointer-events-none absolute inset-0 opacity-70">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.18),transparent_45%),radial-gradient(circle_at_80%_30%,rgba(168,85,247,0.18),transparent_50%),radial-gradient(circle_at_40%_80%,rgba(34,197,94,0.10),transparent_45%)]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/70 to-black" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-md px-6">
+        <Card className="border-white/10 bg-black/55 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_0_60px_rgba(56,189,248,0.10)] backdrop-blur">
+          <CardHeader>
+            {/* AsterNova Studio 渐变艺术字 Logo */}
+            {/* ===== 新增代码 START ===== */}
+            <style>{`
+              .asternova-logo-text {
+                background: linear-gradient(120deg, #ffb6c1, #ff6ad5, #a855f7, #60a5fa);
+                -webkit-background-clip: text;
+                background-clip: text;
+                color: transparent;
+              }
+            `}</style>
+            <div className="mb-3">
+              <div className="asternova-logo-text text-2xl font-semibold tracking-[0.18em]">
+                ASTERNOVA STUDIO
+              </div>
+            </div>
+            {/* ===== 新增代码 END ===== */}
+            <CardTitle className="text-xl tracking-tight">AsterNova Access</CardTitle>
+            <CardDescription className="text-white/70">
+              Reach Beyond the Stars. 登录或注册以进入星际大厅。
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent>
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "login" | "register")}>
+              <TabsList className="grid w-full grid-cols-2 bg-white/5">
+                <TabsTrigger value="login">登录</TabsTrigger>
+                <TabsTrigger value="register">注册</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="login" className="mt-6">
+                <form className="space-y-4" onSubmit={onSubmitLogin}>
+                  <div className="space-y-2">
+                    <Label htmlFor="login-username" className="text-white/80">
+                      用户名
+                    </Label>
+                    <Input
+                      id="login-username"
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      autoComplete="username"
+                      className="border-white/10 bg-black/40 text-white placeholder:text-white/30"
+                      placeholder="输入你的用户名"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="login-password" className="text-white/80">
+                      密码
+                    </Label>
+                    <Input
+                      id="login-password"
+                      type="password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      autoComplete="current-password"
+                      className="border-white/10 bg-black/40 text-white placeholder:text-white/30"
+                      placeholder="输入你的密码"
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    className="w-full bg-cyan-400/90 text-black hover:bg-cyan-300"
+                    disabled={loginSubmitting}
+                  >
+                    {loginSubmitting ? "登录中..." : "登录"}
+                  </Button>
+                </form>
+              </TabsContent>
+
+              <TabsContent value="register" className="mt-6">
+                <form className="space-y-4" onSubmit={onSubmitRegister}>
+                  <div className="space-y-2">
+                    <Label htmlFor="reg-username" className="text-white/80">
+                      用户名
+                    </Label>
+                    <Input
+                      id="reg-username"
+                      value={regUsername}
+                      onChange={(e) => setRegUsername(e.target.value)}
+                      autoComplete="username"
+                      className="border-white/10 bg-black/40 text-white placeholder:text-white/30"
+                      placeholder="为自己起一个星际代号"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="reg-password" className="text-white/80">
+                      密码
+                    </Label>
+                    <Input
+                      id="reg-password"
+                      type="password"
+                      value={regPassword}
+                      onChange={(e) => setRegPassword(e.target.value)}
+                      autoComplete="new-password"
+                      className="border-white/10 bg-black/40 text-white placeholder:text-white/30"
+                      placeholder="设置一个安全的密码"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="reg-email" className="text-white/80">
+                      邮箱
+                    </Label>
+                    <Input
+                      id="reg-email"
+                      type="email"
+                      value={regEmail}
+                      onChange={(e) => setRegEmail(e.target.value)}
+                      autoComplete="email"
+                      className="border-white/10 bg-black/40 text-white placeholder:text-white/30"
+                      placeholder="用于接收验证码"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="col-span-2 space-y-2">
+                      <Label htmlFor="reg-code" className="text-white/80">
+                        验证码
+                      </Label>
+                      <Input
+                        id="reg-code"
+                        value={regCode}
+                        onChange={(e) => setRegCode(e.target.value)}
+                        inputMode="numeric"
+                        className="border-white/10 bg-black/40 text-white placeholder:text-white/30"
+                        placeholder="6 位验证码"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full bg-white/10 text-white hover:bg-white/15"
+                        onClick={onSendCode}
+                        disabled={codeSending}
+                      >
+                        {codeSending ? "发送中..." : "发送验证码"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Button
+                    type="submit"
+                    className="w-full bg-violet-400/90 text-black hover:bg-violet-300"
+                    disabled={regSubmitting}
+                  >
+                    {regSubmitting ? "注册中..." : "注册"}
+                  </Button>
+                </form>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\app\globals.css ---
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\app\layout.tsx ---
+
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Create Next App",
+  description: "Generated by create next app",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+          {children}
+          <Toaster />
+        </ThemeProvider>
+      </body>
+    </html>
+  );
+}
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\app\page.tsx ---
+
+"use client"
+
+import { useRouter } from "next/navigation"
+
+import { CinematicBlackHole } from "@/src/components/CinematicBlackHole"
+
+// ===== 新增代码 START =====
+// 主页蓝紫黑洞重构：倾斜 30° + 鼠标跟随 + 极简深空背景
+export default function Home() {
+  const router = useRouter()
+
+  return (
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-transparent text-white">
+      <style>{`
+        .aster-title {
+          background: linear-gradient(120deg, rgba(56,189,248,0.95), rgba(168,85,247,0.95), rgba(99,102,241,0.95));
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+        }
+        .aster-slogan {
+          color: rgba(255,255,255,0.55);
+          text-shadow: 0 0 14px rgba(255,255,255,0.06);
+        }
+      `}</style>
+
+      {/* ===== 新增代码 START ===== */}
+      {/* 黑洞作为绝对背景：Three.js ShaderMaterial + Bloom 后期 */}
+      <CinematicBlackHole
+        interactive
+        intensity={1}
+        opacity={0.9}
+        className="pointer-events-none absolute inset-0"
+      />
+      {/* ===== 新增代码 END ===== */}
+
+      {/* 内容 */}
+      <div className="relative z-10 flex w-full max-w-4xl flex-col items-center px-6 text-center">
+        <div className="mt-[46vh] sm:mt-[48vh]" />
+
+        <h1 className="aster-title text-3xl font-semibold tracking-[0.22em] sm:text-4xl">ASTERNOVA STUDIO</h1>
+        <p className="aster-slogan mt-3 text-sm sm:text-base">Reach Beyond the Stars</p>
+
+        <div className="mt-8">
+          <button
+            type="button"
+            onClick={() => router.push("/login")}
+            className="group relative inline-flex items-center justify-center rounded-full bg-gradient-to-r from-cyan-300 via-violet-400 to-indigo-400 px-10 py-3 text-sm font-semibold text-black shadow-[0_0_44px_rgba(168,85,247,0.25)] transition duration-300 hover:scale-[1.03] hover:shadow-[0_0_70px_rgba(56,189,248,0.30)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"
+          >
+            <span className="relative z-10 flex items-center gap-2">
+              <span className="text-[0.95rem]">开始自由探索（登录Login）</span>
+              <span className="mt-[1px] text-xs opacity-80">↗</span>
+            </span>
+            <span className="pointer-events-none absolute inset-[1px] rounded-full bg-black/10 transition group-hover:bg-black/15" />
+            <span className="pointer-events-none absolute inset-0 rounded-full bg-[linear-gradient(120deg,rgba(255,255,255,0.0),rgba(255,255,255,0.32),rgba(255,255,255,0.0))] opacity-0 blur-[1px] transition duration-500 group-hover:opacity-100 group-hover:translate-x-1" />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+// ===== 新增代码 END =====
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\components\ui\button.tsx ---
+
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
+import { Slot } from "radix-ui"
+
+import { cn } from "@/lib/utils"
+
+const buttonVariants = cva(
+  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  {
+    variants: {
+      variant: {
+        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        outline:
+          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+        secondary:
+          "bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+        ghost:
+          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+        destructive:
+          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
+        link: "text-primary underline-offset-4 hover:underline",
+      },
+      size: {
+        default:
+          "h-8 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+        xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-7 gap-1 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-9 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-3 has-data-[icon=inline-start]:pl-3",
+        icon: "size-8",
+        "icon-xs":
+          "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm":
+          "size-7 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg",
+        "icon-lg": "size-9",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+)
+
+function Button({
+  className,
+  variant = "default",
+  size = "default",
+  asChild = false,
+  ...props
+}: React.ComponentProps<"button"> &
+  VariantProps<typeof buttonVariants> & {
+    asChild?: boolean
+  }) {
+  const Comp = asChild ? Slot.Root : "button"
+
+  return (
+    <Comp
+      data-slot="button"
+      data-variant={variant}
+      data-size={size}
+      className={cn(buttonVariants({ variant, size, className }))}
+      {...props}
+    />
+  )
+}
+
+export { Button, buttonVariants }
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\components\ui\card.tsx ---
+
+import * as React from "react"
+
+import { cn } from "@/lib/utils"
+
+function Card({
+  className,
+  size = "default",
+  ...props
+}: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
+  return (
+    <div
+      data-slot="card"
+      data-size={size}
+      className={cn(
+        "group/card flex flex-col gap-4 overflow-hidden rounded-xl bg-card py-4 text-sm text-card-foreground ring-1 ring-foreground/10 has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:gap-3 data-[size=sm]:py-3 data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-header"
+      className={cn(
+        "group/card-header @container/card-header grid auto-rows-min items-start gap-1 rounded-t-xl px-4 group-data-[size=sm]/card:px-3 has-data-[slot=card-action]:grid-cols-[1fr_auto] has-data-[slot=card-description]:grid-rows-[auto_auto] [.border-b]:pb-4 group-data-[size=sm]/card:[.border-b]:pb-3",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-title"
+      className={cn(
+        "text-base leading-snug font-medium group-data-[size=sm]/card:text-sm",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-description"
+      className={cn("text-sm text-muted-foreground", className)}
+      {...props}
+    />
+  )
+}
+
+function CardAction({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-action"
+      className={cn(
+        "col-start-2 row-span-2 row-start-1 self-start justify-self-end",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function CardContent({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-content"
+      className={cn("px-4 group-data-[size=sm]/card:px-3", className)}
+      {...props}
+    />
+  )
+}
+
+function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card-footer"
+      className={cn(
+        "flex items-center rounded-b-xl border-t bg-muted/50 p-4 group-data-[size=sm]/card:p-3",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export {
+  Card,
+  CardHeader,
+  CardFooter,
+  CardTitle,
+  CardAction,
+  CardDescription,
+  CardContent,
+}
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\components\ui\input.tsx ---
+
+import * as React from "react"
+
+import { cn } from "@/lib/utils"
+
+function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+  return (
+    <input
+      type={type}
+      data-slot="input"
+      className={cn(
+        "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { Input }
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\components\ui\label.tsx ---
+
+"use client"
+
+import * as React from "react"
+import { Label as LabelPrimitive } from "radix-ui"
+
+import { cn } from "@/lib/utils"
+
+function Label({
+  className,
+  ...props
+}: React.ComponentProps<typeof LabelPrimitive.Root>) {
+  return (
+    <LabelPrimitive.Root
+      data-slot="label"
+      className={cn(
+        "flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { Label }
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\components\ui\sonner.tsx ---
+
+ "use client"
+
+import * as React from "react"
+import { useTheme } from "next-themes"
+import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+
+const Toaster = ({ ...props }: ToasterProps) => {
+  const { theme = "system" } = useTheme()
+
+  return (
+    <Sonner
+      theme={theme as ToasterProps["theme"]}
+      className="toaster group"
+      icons={{
+        success: (
+          <CircleCheckIcon className="size-4" />
+        ),
+        info: (
+          <InfoIcon className="size-4" />
+        ),
+        warning: (
+          <TriangleAlertIcon className="size-4" />
+        ),
+        error: (
+          <OctagonXIcon className="size-4" />
+        ),
+        loading: (
+          <Loader2Icon className="size-4 animate-spin" />
+        ),
+      }}
+      style={
+        {
+          "--normal-bg": "var(--popover)",
+          "--normal-text": "var(--popover-foreground)",
+          "--normal-border": "var(--border)",
+          "--border-radius": "var(--radius)",
+        } as React.CSSProperties
+      }
+      toastOptions={{
+        classNames: {
+          toast: "cn-toast",
+        },
+      }}
+      {...props}
+    />
+  )
+}
+
+export { Toaster }
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\components\ui\tabs.tsx ---
+
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
+import { Tabs as TabsPrimitive } from "radix-ui"
+
+import { cn } from "@/lib/utils"
+
+function Tabs({
+  className,
+  orientation = "horizontal",
+  ...props
+}: React.ComponentProps<typeof TabsPrimitive.Root>) {
+  return (
+    <TabsPrimitive.Root
+      data-slot="tabs"
+      data-orientation={orientation}
+      className={cn(
+        "group/tabs flex gap-2 data-horizontal:flex-col",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+const tabsListVariants = cva(
+  "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg p-[3px] text-muted-foreground group-data-horizontal/tabs:h-8 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
+  {
+    variants: {
+      variant: {
+        default: "bg-muted",
+        line: "gap-1 bg-transparent",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  }
+)
+
+function TabsList({
+  className,
+  variant = "default",
+  ...props
+}: React.ComponentProps<typeof TabsPrimitive.List> &
+  VariantProps<typeof tabsListVariants>) {
+  return (
+    <TabsPrimitive.List
+      data-slot="tabs-list"
+      data-variant={variant}
+      className={cn(tabsListVariants({ variant }), className)}
+      {...props}
+    />
+  )
+}
+
+function TabsTrigger({
+  className,
+  ...props
+}: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
+  return (
+    <TabsPrimitive.Trigger
+      data-slot="tabs-trigger"
+      className={cn(
+        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 dark:text-muted-foreground dark:hover:text-foreground group-data-[variant=default]/tabs-list:data-active:shadow-sm group-data-[variant=line]/tabs-list:data-active:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
+        "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
+        "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:bottom-[-5px] group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function TabsContent({
+  className,
+  ...props
+}: React.ComponentProps<typeof TabsPrimitive.Content>) {
+  return (
+    <TabsPrimitive.Content
+      data-slot="tabs-content"
+      className={cn("flex-1 text-sm outline-none", className)}
+      {...props}
+    />
+  )
+}
+
+export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants }
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\components\theme-provider.tsx ---
+
+"use client"
+
+import * as React from "react"
+import { ThemeProvider as NextThemesProvider } from "next-themes"
+
+type ThemeProviderProps = React.ComponentProps<typeof NextThemesProvider>
+
+export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
+  return <NextThemesProvider {...props}>{children}</NextThemesProvider>
+}
+
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\lib\utils.ts ---
+
+import { clsx, type ClassValue } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\src\api\auth.ts ---
+
+import axios, { AxiosError } from "axios"
+
+// ===== 新增代码 START =====
+// 使用 Next.js 本地代理路径，避免直接访问 127.0.0.1:8081，彻底规避浏览器 Private Network / CORS 报错
+const API_BASE_URL = "/api/proxy"
+
+export const authApi = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+})
+// ===== 新增代码 END =====
+
+type ApiErrorBody = {
+  error?: string
+  message?: string
+}
+
+export function getApiErrorMessage(err: unknown): string {
+  if (axios.isAxiosError(err)) {
+    const axErr = err as AxiosError<ApiErrorBody>
+    const body = axErr.response?.data
+    return (
+      body?.error ||
+      body?.message ||
+      axErr.response?.statusText ||
+      axErr.message ||
+      "请求失败"
+    )
+  }
+  if (err instanceof Error) return err.message
+  return "请求失败"
+}
+
+export async function sendCode(email: string): Promise<{ message: string }> {
+  const res = await authApi.post("/send_code", { email })
+  return res.data as { message: string }
+}
+
+export async function register(
+  username: string,
+  password: string,
+  email: string,
+  code: string,
+): Promise<{ id: number; message: string }> {
+  const res = await authApi.post("/register", { username, password, email, code })
+  return res.data as { id: number; message: string }
+}
+
+export async function login(
+  username: string,
+  password: string,
+): Promise<{ message: string; token: string }> {
+  const res = await authApi.post("/login", { username, password })
+  return res.data as { message: string; token: string }
+}
+
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\src\api\jwt.ts ---
+
+import { jwtDecode } from "jwt-decode"
+
+type JwtPayloadShape = {
+  user_id?: number
+  userID?: number
+  exp?: number
+  iat?: number
+}
+
+export function extractUserIdFromToken(token: string): number {
+  const payload = jwtDecode<JwtPayloadShape>(token)
+
+  const candidate = payload.user_id ?? payload.userID
+  if (typeof candidate === "number" && Number.isFinite(candidate)) {
+    return candidate
+  }
+
+  throw new Error("无法从 Token 中解析 userId")
+}
+
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\src\components\bluePurpleBlackhole.tsx ---
+
+ "use client"
+
+ import * as React from "react"
+
+ type BluePurpleBlackholeProps = {
+   className?: string
+   intensity?: number
+   interactive?: boolean
+ }
+
+ // ===== 新增代码 START =====
+ // 蓝紫黑洞动效：倾斜 30° + 轻量鼠标跟随（用于主页与登录页背景复用）
+ export function BluePurpleBlackhole(props: BluePurpleBlackholeProps) {
+   const { className, intensity = 1, interactive = true } = props
+
+   const wrapRef = React.useRef<HTMLDivElement | null>(null)
+   const rafRef = React.useRef<number | null>(null)
+
+   const targetRef = React.useRef({ x: 0, y: 0, d: 0 })
+   const currentRef = React.useRef({ x: 0, y: 0, d: 0 })
+
+   React.useEffect(() => {
+     const el = wrapRef.current
+     if (!el) return
+
+     if (!interactive) {
+       el.style.setProperty("--bh-x", "0px")
+       el.style.setProperty("--bh-y", "0px")
+       el.style.setProperty("--bh-r", "0deg")
+       el.style.setProperty("--bh-tilt", "-30deg")
+       el.style.setProperty("--bh-speed", "1")
+       return
+     }
+
+     const onMove = (ev: PointerEvent) => {
+       const rect = el.getBoundingClientRect()
+       const cx = rect.left + rect.width / 2
+       const cy = rect.top + rect.height / 2
+       const dx = (ev.clientX - cx) / Math.max(1, rect.width)
+       const dy = (ev.clientY - cy) / Math.max(1, rect.height)
+       const d = Math.min(1, Math.sqrt(dx * dx + dy * dy))
+
+       targetRef.current.x = dx
+       targetRef.current.y = dy
+       targetRef.current.d = d
+     }
+
+     window.addEventListener("pointermove", onMove, { passive: true })
+     return () => {
+       window.removeEventListener("pointermove", onMove)
+     }
+   }, [interactive])
+
+   React.useEffect(() => {
+     const el = wrapRef.current
+     if (!el) return
+
+     const tick = () => {
+       const t = targetRef.current
+       const c = currentRef.current
+
+       c.x += (t.x - c.x) * 0.08
+       c.y += (t.y - c.y) * 0.08
+       c.d += (t.d - c.d) * 0.08
+
+       const px = c.x * 26 * intensity
+       const py = c.y * 22 * intensity
+       const rot = c.x * 10 * intensity
+       const tilt = -30 + c.y * 6 * intensity
+       const speed = 1 + (1 - c.d) * 1.2 * intensity
+
+       el.style.setProperty("--bh-x", `${px}px`)
+       el.style.setProperty("--bh-y", `${py}px`)
+       el.style.setProperty("--bh-r", `${rot}deg`)
+       el.style.setProperty("--bh-tilt", `${tilt}deg`)
+       el.style.setProperty("--bh-speed", `${speed}`)
+
+       rafRef.current = window.requestAnimationFrame(tick)
+     }
+
+     rafRef.current = window.requestAnimationFrame(tick)
+     return () => {
+       if (rafRef.current) window.cancelAnimationFrame(rafRef.current)
+       rafRef.current = null
+     }
+   }, [intensity])
+
+   return (
+     <div ref={wrapRef} className={["relative", className || ""].join(" ")}>
+       <style>{`
+         @keyframes bhSpin {
+           0% { transform: translate(var(--bh-x), var(--bh-y)) rotate(var(--bh-tilt)) rotate(var(--bh-r)) rotate(0deg); }
+           100% { transform: translate(var(--bh-x), var(--bh-y)) rotate(var(--bh-tilt)) rotate(var(--bh-r)) rotate(360deg); }
+         }
+         @keyframes bhBreathe {
+           0%, 100% { transform: translate(var(--bh-x), var(--bh-y)) rotate(var(--bh-tilt)) rotate(var(--bh-r)) scale(1); opacity: .92; }
+           50% { transform: translate(var(--bh-x), var(--bh-y)) rotate(var(--bh-tilt)) rotate(var(--bh-r)) scale(1.04); opacity: 1; }
+         }
+       `}</style>
+
+       {/* 黑洞主体 */}
+       <div className="pointer-events-none absolute left-1/2 top-[38%] h-[340px] w-[340px] -translate-x-1/2 -translate-y-1/2 sm:h-[420px] sm:w-[420px]">
+         {/* 吸积盘 */}
+         <div
+           className="absolute left-1/2 top-1/2 h-[320px] w-[320px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[2px] sm:h-[400px] sm:w-[400px]"
+           style={{
+             background:
+               "conic-gradient(from 210deg, rgba(99,102,241,0.05), rgba(56,189,248,0.55), rgba(168,85,247,0.78), rgba(99,102,241,0.62), rgba(56,189,248,0.55), rgba(99,102,241,0.05))",
+             boxShadow:
+               "0 0 24px rgba(56,189,248,0.20), 0 0 70px rgba(168,85,247,0.22), 0 0 120px rgba(99,102,241,0.18)",
+             animation: "bhSpin calc(9s / var(--bh-speed)) linear infinite",
+             transformOrigin: "center",
+           }}
+         />
+
+         {/* 事件视界 */}
+         <div
+           className="absolute left-1/2 top-1/2 h-[178px] w-[178px] -translate-x-1/2 -translate-y-1/2 rounded-full sm:h-[220px] sm:w-[220px]"
+           style={{
+             background: "radial-gradient(circle at 45% 40%, rgba(0,0,0,0.98) 0 55%, rgba(0,0,0,0.0) 70%)",
+             boxShadow: "0 0 42px rgba(0,0,0,1), inset 0 0 22px rgba(0,0,0,0.95)",
+             animation: "bhBreathe 6.6s ease-in-out infinite",
+           }}
+         />
+
+         {/* 微弱外晕 */}
+         <div
+           className="absolute left-1/2 top-1/2 h-[420px] w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-full sm:h-[520px] sm:w-[520px]"
+           style={{
+             background:
+               "radial-gradient(circle, rgba(56,189,248,0.08), rgba(168,85,247,0.06), rgba(0,0,0,0))",
+             filter: "blur(1px)",
+             opacity: 0.9,
+           }}
+         />
+       </div>
+     </div>
+   )
+ }
+ // ===== 新增代码 END =====
+
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\src\components\CinematicBlackHole.tsx ---
+
+"use client"
+
+import * as React from "react"
+import * as THREE from "three"
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer"
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass"
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass"
+
+export type CinematicBlackHoleProps = {
+  className?: string
+  intensity?: number
+  opacity?: number
+  interactive?: boolean
+}
+
+type ShaderUniforms = {
+  u_time: { value: number }
+  u_resolution: { value: THREE.Vector2 }
+  u_viewDir: { value: THREE.Vector3 }
+  u_intensity: { value: number }
+}
+
+export function CinematicBlackHole(props: CinematicBlackHoleProps) {
+  const { className = "", intensity = 1, opacity = 1, interactive = true } = props
+
+  const wrapRef = React.useRef<HTMLDivElement | null>(null)
+  const rafRef = React.useRef<number | null>(null)
+
+  const rendererRef = React.useRef<THREE.WebGLRenderer | null>(null)
+  const sceneRef = React.useRef<THREE.Scene | null>(null)
+  const cameraRef = React.useRef<THREE.PerspectiveCamera | null>(null)
+  const composerRef = React.useRef<EffectComposer | null>(null)
+  const uniformsRef = React.useRef<ShaderUniforms | null>(null)
+  const orbitTargetRef = React.useRef({ x: 0, y: 0 })
+  const orbitRef = React.useRef({ x: 0, y: 0 })
+
+  React.useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+
+    let renderer: THREE.WebGLRenderer
+    let geometry: THREE.PlaneGeometry
+    let material: THREE.ShaderMaterial
+
+    const width = Math.max(1, wrap.clientWidth)
+    const height = Math.max(1, wrap.clientHeight)
+    const pr = Math.min(2, window.devicePixelRatio || 1)
+
+    const scene = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(58, width / height, 0.01, 10)
+    camera.position.set(0, 0, 1)
+    camera.rotation.set(-0.08, 0.0, 0.0)
+
+    renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: "high-performance",
+    })
+    renderer.setPixelRatio(pr)
+    renderer.setSize(width, height, false)
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.0 * intensity
+
+    const vertexShader = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`
+
+    const fragmentShader = `
+precision highp float;
+varying vec2 vUv;
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform vec3 u_viewDir;
+uniform float u_intensity;
+
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+float noise2(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
+
+float fbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+  for (int i = 0; i < 4; i++) {
+    v += a * noise2(p);
+    p = m * p;
+    a *= 0.5;
+  }
+  return v;
+}
+
+vec3 starfield(vec2 uv) {
+  vec2 p = uv * 95.0;
+  vec2 id = floor(p);
+  vec2 gv = fract(p) - 0.5;
+  float rnd = hash21(id);
+  float star = 0.0;
+  if (rnd > 0.992) {
+    float d = length(gv);
+    star = smoothstep(0.08, 0.0, d);
+    star *= (0.4 + 0.6 * hash21(id + 7.13));
+  }
+
+  float neb = fbm(uv * 3.5 + vec2(0.0, u_time * 0.01));
+  vec3 bg = vec3(0.0025, 0.003, 0.008);
+  bg += vec3(0.008, 0.012, 0.02) * neb * 0.12;
+  bg += vec3(0.65, 0.72, 0.85) * star * 0.38;
+  return bg;
+}
+
+void main() {
+  vec2 res = max(u_resolution, vec2(1.0));
+  float minDim = min(res.x, res.y);
+  vec2 uv = (gl_FragCoord.xy - 0.5 * res) / minDim;
+
+  float r = length(uv);
+  float theta = atan(uv.y, uv.x);
+  float eventHorizon = 0.16;
+
+  // 引力透镜：越靠近黑洞扭曲越强
+  vec2 dir = normalize(uv + vec2(1e-6));
+  float lensStrength = 0.12 + 0.18 * u_intensity;
+  float distortion = lensStrength / max(r * 8.0, 0.08);
+  vec2 uvLensed = uv + dir * distortion;
+
+  // 背景固定深空：不跟随鼠标
+  vec3 bg = starfield(uvLensed);
+
+  // 事件视界：完全黑体
+  if (r < eventHorizon) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+
+  // 吸积盘：极薄主环 + 内圈高亮
+  vec2 diskUv = vec2(uvLensed.x, uvLensed.y * 3.9);
+  float diskR = length(diskUv);
+  float diskAngle = atan(diskUv.y, diskUv.x);
+
+  float diskRadius = 0.34;
+  float diskWidth = 0.008;
+  float mainRing = exp(-abs(diskR - diskRadius) / diskWidth);
+  mainRing *= smoothstep(eventHorizon * 1.04, diskRadius + 0.12, diskR);
+  float innerRing = exp(-abs(diskR - (diskRadius - 0.022)) / 0.009);
+  innerRing *= smoothstep(eventHorizon * 1.05, diskRadius + 0.04, diskR);
+
+  // 高速旋转
+  float spin = u_time * 0.26;
+  float rotAngle = diskAngle + spin;
+
+  // 多普勒：dot(viewDir, velocity) 亮度不对称
+  vec2 tangent = vec2(-sin(rotAngle), cos(rotAngle));
+  vec3 velocity = normalize(vec3(tangent, 0.0));
+  vec3 viewDir = normalize(u_viewDir);
+  float doppler = dot(viewDir, velocity); // [-1, 1]
+  float approach = clamp(doppler * 0.5 + 0.5, 0.0, 1.0);
+  float recede = 1.0 - approach;
+
+  float bright = mix(0.2, 2.2, pow(approach, 2.35));
+  bright *= mix(1.0, 0.48, pow(recede, 1.05));
+
+  float innerHot = smoothstep(diskRadius + 0.016, diskRadius - 0.018, diskR);
+  vec3 colBlue = vec3(0.18, 0.58, 1.0);
+  vec3 colPurple = vec3(0.62, 0.18, 1.0);
+  vec3 colWhite = vec3(0.98, 0.99, 1.0);
+  vec3 diskBase = mix(colPurple, colBlue, 0.5 + 0.5 * sin(rotAngle * 3.0));
+  vec3 diskColor = diskBase * bright;
+  diskColor = mix(diskColor, colWhite * (1.2 + bright * 0.35), innerHot * approach);
+
+  float streak = 0.9 + 0.1 * sin(rotAngle * 9.0 + u_time * 0.35);
+  streak *= 0.92 + 0.08 * sin(rotAngle * 4.0 - u_time * 0.18);
+  vec3 disk = diskColor * (mainRing * 0.95 + innerRing * 0.65) * streak;
+
+  // 黑洞边缘环形光圈：更细、更精致的蓝紫波浪流动
+  float edgeR = eventHorizon + 0.125;
+  float edgeW = 0.011;
+  float edgeRing = exp(-abs(r - edgeR) / edgeW);
+
+  // 低频主波 + 高频细纹：无接缝角向映射 + 1.5x 速度
+  vec2 nrm = normalize(uv + vec2(1e-6));
+  float phaseA = dot(nrm, vec2(cos(u_time * 0.63), sin(u_time * 0.63)));
+  float phaseB = dot(nrm, vec2(cos(-u_time * 0.42), sin(-u_time * 0.42)));
+  float phaseC = dot(nrm, vec2(cos(u_time * 0.24), sin(u_time * 0.24)));
+  float waveSlow = 0.5 + 0.5 * sin(phaseA * 3.2 + u_time * 0.11);
+  float waveMid = 0.5 + 0.5 * sin(phaseB * 5.8 - u_time * 0.075);
+  float waveFine = 0.5 + 0.5 * sin(phaseC * 14.0 + u_time * 0.04);
+  float ripple = (0.76 + 0.24 * waveSlow) * (0.88 + 0.12 * waveMid);
+  float thicknessWave = 0.975 + 0.025 * waveFine;
+  edgeRing *= ripple * thicknessWave;
+
+  vec3 edgePurple = vec3(0.62, 0.18, 1.0);
+  vec3 edgeBlue = vec3(0.2, 0.64, 1.0);
+  vec3 edgeWhiteBlue = vec3(0.9, 0.97, 1.0);
+  float gradA = 0.5 + 0.5 * sin(dot(nrm, vec2(cos(u_time * 0.24), sin(u_time * 0.24))) * 1.8);
+  float gradB = 0.5 + 0.5 * sin(dot(nrm, vec2(cos(-u_time * 0.2), sin(-u_time * 0.2))) * 2.8);
+  vec3 edgeCol = mix(edgePurple, edgeBlue, gradA);
+  edgeCol = mix(edgeCol, edgeWhiteBlue, 0.08 * gradB);
+  vec3 edgeHalo = edgeCol * edgeRing * 0.98;
+
+  // 靠近视界的吞噬暗晕
+  float swallow = 1.0 - smoothstep(eventHorizon * 1.02, eventHorizon * 3.4, r);
+  bg *= mix(0.82, 0.2, swallow);
+
+  vec3 col = bg + disk + edgeHalo;
+  float vignette = smoothstep(1.55, 0.35, length(uv));
+  col *= 0.8 + 0.2 * vignette;
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`
+
+    const uniforms: ShaderUniforms = {
+      u_time: { value: 0 },
+      u_resolution: { value: new THREE.Vector2(width * pr, height * pr) },
+      u_viewDir: { value: new THREE.Vector3(0, 0, 1) },
+      u_intensity: { value: intensity },
+    }
+    uniformsRef.current = uniforms
+
+    geometry = new THREE.PlaneGeometry(2, 2)
+    material = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader,
+      fragmentShader,
+      depthTest: false,
+      depthWrite: false,
+    })
+    const mesh = new THREE.Mesh(geometry, material)
+    scene.add(mesh)
+
+    const composer = new EffectComposer(renderer)
+    composer.addPass(new RenderPass(scene, camera))
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(width, height), 0.62, 0.34, 0.3))
+
+    wrap.appendChild(renderer.domElement)
+    renderer.domElement.className = "absolute inset-0 z-0 pointer-events-none"
+    renderer.domElement.style.width = "100%"
+    renderer.domElement.style.height = "100%"
+
+    rendererRef.current = renderer
+    sceneRef.current = scene
+    cameraRef.current = camera
+    composerRef.current = composer
+
+    const onPointerMove = (ev: PointerEvent) => {
+      if (!interactive) return
+      const rect = wrap.getBoundingClientRect()
+      const nx = (ev.clientX - rect.left) / Math.max(1, rect.width)
+      const ny = (ev.clientY - rect.top) / Math.max(1, rect.height)
+      orbitTargetRef.current.x = Math.max(-1, Math.min(1, (nx - 0.5) * 2.0))
+      orbitTargetRef.current.y = Math.max(-1, Math.min(1, (ny - 0.5) * 2.0))
+    }
+
+    const onResize = () => {
+      const w = Math.max(1, wrap.clientWidth)
+      const h = Math.max(1, wrap.clientHeight)
+      const p = Math.min(2, window.devicePixelRatio || 1)
+      if (!rendererRef.current || !cameraRef.current || !composerRef.current || !uniformsRef.current) return
+      rendererRef.current.setPixelRatio(p)
+      rendererRef.current.setSize(w, h, false)
+      cameraRef.current.aspect = w / h
+      cameraRef.current.updateProjectionMatrix()
+      composerRef.current.setSize(w, h)
+      uniformsRef.current.u_resolution.value.set(w * p, h * p)
+    }
+
+    window.addEventListener("pointermove", onPointerMove, { passive: true })
+    window.addEventListener("resize", onResize)
+
+    const clock = new THREE.Clock()
+    const viewDir = new THREE.Vector3(0, 0, 1)
+    const tick = () => {
+      const dt = clock.getDelta()
+      const t = clock.elapsedTime
+
+      orbitRef.current.x += (orbitTargetRef.current.x - orbitRef.current.x) * (1 - Math.exp(-dt * 8.0))
+      orbitRef.current.y += (orbitTargetRef.current.y - orbitRef.current.y) * (1 - Math.exp(-dt * 8.0))
+
+      const yaw = orbitRef.current.x * 0.1
+      const pitch = orbitRef.current.y * 0.1 - 0.08
+      camera.rotation.set(pitch, yaw, 0)
+      camera.updateMatrixWorld()
+      camera.getWorldDirection(viewDir)
+
+      if (uniformsRef.current) {
+        uniformsRef.current.u_time.value = t
+        uniformsRef.current.u_viewDir.value.copy(viewDir)
+        uniformsRef.current.u_intensity.value = intensity
+      }
+
+      composer.render()
+      rafRef.current = window.requestAnimationFrame(tick)
+    }
+
+    rafRef.current = window.requestAnimationFrame(tick)
+
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove)
+      window.removeEventListener("resize", onResize)
+      if (rafRef.current) window.cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+
+      try {
+        material.dispose()
+        geometry.dispose()
+        renderer.dispose()
+      } catch {
+        // ignore
+      }
+
+      try {
+        if (renderer.domElement.parentElement === wrap) wrap.removeChild(renderer.domElement)
+      } catch {
+        // ignore
+      }
+
+      composerRef.current = null
+      rendererRef.current = null
+      sceneRef.current = null
+      cameraRef.current = null
+      uniformsRef.current = null
+    }
+  }, [interactive, intensity])
+
+  return (
+    <div
+      ref={wrapRef}
+      className={`fixed inset-0 z-0 pointer-events-none w-screen h-screen bg-black ${className}`.trim()}
+      style={{ opacity }}
+    />
+  )
+}
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\src\store\useGameStore.ts ---
+
+import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
+
+// AsterNova 前端全局状态仓库：
+// - 统一承载“登录态 + 大厅/房间 + 角色选择”等跨页面共享的数据（对应替代 Unity 的 DataManager/GameManager 的职责）
+// - 使用 persist 将关键登录信息持久化到 localStorage，避免刷新页面丢失登录态
+type GameState = {
+  token: string;
+  setToken: (token: string) => void;
+
+  userId: number;
+  setUserId: (userId: number) => void;
+
+  username: string;
+  setUsername: (username: string) => void;
+
+  selectedClass: string;
+  setSelectedClass: (selectedClass: string) => void;
+
+  currentRoomId: string;
+  setCurrentRoomId: (currentRoomId: string) => void;
+
+  clearAuth: () => void;
+};
+
+export const useGameStore = create<GameState>()(
+  persist(
+    (set) => ({
+      token: '',
+      setToken: (token) => set({ token }),
+
+      userId: 0,
+      setUserId: (userId) => set({ userId }),
+
+      username: '',
+      setUsername: (username) => set({ username }),
+
+      selectedClass: 'Role1_Speedster',
+      setSelectedClass: (selectedClass) => set({ selectedClass }),
+
+      currentRoomId: '',
+      setCurrentRoomId: (currentRoomId) => set({ currentRoomId }),
+
+      // 清空登录态（用于主动登出 / token 失效后的兜底）
+      // 注意：由于本 store 开启了 persist，重置后的 token/userId 也会自动同步写回 localStorage
+      clearAuth: () =>
+        set({
+          token: '',
+          userId: 0,
+        }),
+    }),
+    {
+      // localStorage 存储键名（可在浏览器 DevTools -> Application -> Local Storage 中查看）
+      name: 'game-store',
+      // 使用 localStorage 作为持久化介质（仅在浏览器环境可用）
+      storage: createJSONStorage(() => localStorage),
+      // 只持久化登录关键字段，避免把临时 UI/房间状态写入本地导致“脏状态”
+      partialize: (state) => ({
+        token: state.token,
+        userId: state.userId,
+        selectedClass: state.selectedClass,
+        currentRoomId: state.currentRoomId,
+      }),
+    },
+  ),
+);
+
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\next-env.d.ts ---
+
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+import "./.next/dev/types/routes.d.ts";
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+
+--- FILE: C:\Users\TimeCraker\Desktop\asternova-web-client\next.config.ts ---
+
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+  async headers() {
+    return [
+      {
+        source: "/unity/Build/:file*\\.data\\.gz",
+        headers: [
+          { key: "Content-Type", value: "application/octet-stream" },
+          { key: "Content-Encoding", value: "gzip" },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
+      {
+        source: "/unity/Build/:file*\\.framework\\.js\\.gz",
+        headers: [
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+          { key: "Content-Encoding", value: "gzip" },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
+      {
+        source: "/unity/Build/:file*\\.wasm\\.gz",
+        headers: [
+          { key: "Content-Type", value: "application/wasm" },
+          { key: "Content-Encoding", value: "gzip" },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
+    ];
+  },
+  // ===== 新增代码 START =====
+  // 通过 Next.js Rewrite 将前端 /api/proxy/:path* 请求代理到本地 Go 网关，消除浏览器的 Private Network / CORS 报错
+  async rewrites() {
+    return [
+      {
+        source: "/api/proxy/:path*",
+        destination: "http://127.0.0.1:8081/api/v1/:path*",
+      },
+    ];
+  },
+  // ===== 新增代码 END =====
+};
+
+export default nextConfig;

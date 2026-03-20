@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { getApiErrorMessage, login, register, sendCode } from "@/src/api/auth"
 import { extractUserIdFromToken } from "@/src/api/jwt"
 import { useGameStore } from "@/src/store/useGameStore"
+import { BluePurpleBlackhole } from "@/src/components/bluePurpleBlackhole"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -34,12 +35,49 @@ export default function LoginPage() {
   const [codeSending, setCodeSending] = React.useState(false)
   const [regSubmitting, setRegSubmitting] = React.useState(false)
 
+  // ===== 新增代码 START =====
+  // 登录/注册表单前端校验：用户名长度与密码复杂度
+  function validateUsername(name: string): string | null {
+    if (!name) {
+      return "用户名不能为空"
+    }
+    if (name.length > 10) {
+      return "用户名长度不能超过 10 位"
+    }
+    return null
+  }
+
+  function validatePassword(pwd: string): string | null {
+    if (!pwd) {
+      return "密码不能为空"
+    }
+    const re = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{6,20}$/
+    if (!re.test(pwd)) {
+      return "密码需为 6-20 位字母+数字组合"
+    }
+    return null
+  }
+  // ===== 新增代码 END =====
+
   async function onSubmitLogin(e: React.FormEvent) {
     e.preventDefault()
     if (!loginUsername || !loginPassword) {
       toast.error("请输入用户名与密码")
       return
     }
+
+    // ===== 新增代码 START =====
+    const usernameErr = validateUsername(loginUsername)
+    if (usernameErr) {
+      toast.error(usernameErr)
+      return
+    }
+    const passwordErr = validatePassword(loginPassword)
+    if (passwordErr) {
+      toast.error(passwordErr)
+      return
+    }
+    // ===== 新增代码 END =====
 
     setLoginSubmitting(true)
     try {
@@ -82,6 +120,19 @@ export default function LoginPage() {
       return
     }
 
+    // ===== 新增代码 START =====
+    const regUsernameErr = validateUsername(regUsername)
+    if (regUsernameErr) {
+      toast.error(regUsernameErr)
+      return
+    }
+    const regPasswordErr = validatePassword(regPassword)
+    if (regPasswordErr) {
+      toast.error(regPasswordErr)
+      return
+    }
+    // ===== 新增代码 END =====
+
     setRegSubmitting(true)
     try {
       const res = await register(regUsername, regPassword, regEmail, regCode)
@@ -97,16 +148,37 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-black">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-transparent">
+      {/* ===== 新增代码 START ===== */}
+      {/* 主页同款蓝紫黑洞动效：作为登录页底层背景（保持原布局） */}
+      <BluePurpleBlackhole className="pointer-events-none absolute inset-0 opacity-30" intensity={0.8} interactive={false} />
+      {/* ===== 新增代码 END ===== */}
+
       <div className="pointer-events-none absolute inset-0 opacity-70">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.18),transparent_45%),radial-gradient(circle_at_80%_30%,rgba(168,85,247,0.18),transparent_50%),radial-gradient(circle_at_40%_80%,rgba(34,197,94,0.10),transparent_45%)]" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/70 to-black" />
       </div>
 
-      <div className="relative w-full max-w-md px-6">
+      <div className="relative z-10 w-full max-w-md px-6">
         <Card className="border-white/10 bg-black/55 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_0_60px_rgba(56,189,248,0.10)] backdrop-blur">
           <CardHeader>
-            <CardTitle className="text-2xl tracking-tight">AsterNova Access</CardTitle>
+            {/* AsterNova Studio 渐变艺术字 Logo */}
+            {/* ===== 新增代码 START ===== */}
+            <style>{`
+              .asternova-logo-text {
+                background: linear-gradient(120deg, #ffb6c1, #ff6ad5, #a855f7, #60a5fa);
+                -webkit-background-clip: text;
+                background-clip: text;
+                color: transparent;
+              }
+            `}</style>
+            <div className="mb-3">
+              <div className="asternova-logo-text text-2xl font-semibold tracking-[0.18em]">
+                ASTERNOVA STUDIO
+              </div>
+            </div>
+            {/* ===== 新增代码 END ===== */}
+            <CardTitle className="text-xl tracking-tight">AsterNova Access</CardTitle>
             <CardDescription className="text-white/70">
               Reach Beyond the Stars. 登录或注册以进入星际大厅。
             </CardDescription>
@@ -245,10 +317,6 @@ export default function LoginPage() {
             </Tabs>
           </CardContent>
         </Card>
-
-        <div className="mt-6 text-center text-xs text-white/50">
-          接口基址：<span className="font-mono text-white/60">http://127.0.0.1:8081/api/v1</span>
-        </div>
       </div>
     </div>
   )
