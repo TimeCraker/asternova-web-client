@@ -126,7 +126,9 @@ export default function LobbyPage() {
         if (msg?.type === "match_success" && typeof msg.room_id === "string" && msg.room_id) {
           setCurrentRoomId(msg.room_id)
           toast.success("匹配成功！正在建立战场链接...")
-          // 不在这里手动 close，交给路由切换后的 cleanup 自然释放，避免“刚匹配就断链”误判
+
+          // ===== 新增核心代码：颁发进入战场的合法凭证 =====
+          useGameStore.getState().setSessionReadyForBattle(true)
 
           matchingTimeoutRef.current = window.setTimeout(() => {
             router.push("/arena")

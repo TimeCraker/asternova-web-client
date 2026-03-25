@@ -20,6 +20,9 @@ type GameState = {
   currentRoomId: string;
   setCurrentRoomId: (currentRoomId: string) => void;
 
+  sessionReadyForBattle: boolean;
+  setSessionReadyForBattle: (ready: boolean) => void;
+
   clearAuth: () => void;
 };
 
@@ -41,12 +44,16 @@ export const useGameStore = create<GameState>()(
       currentRoomId: '',
       setCurrentRoomId: (currentRoomId) => set({ currentRoomId }),
 
+      sessionReadyForBattle: false,
+      setSessionReadyForBattle: (ready) => set({ sessionReadyForBattle: ready }),
+
       // 清空登录态（用于主动登出 / token 失效后的兜底）
       // 注意：由于本 store 开启了 persist，重置后的 token/userId 也会自动同步写回 localStorage
       clearAuth: () =>
         set({
           token: '',
           userId: 0,
+          sessionReadyForBattle: false,
         }),
     }),
     {
