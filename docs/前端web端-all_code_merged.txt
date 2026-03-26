@@ -4,14 +4,11 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Orbitron } from "next/font/google"
-import { Unity, useUnityContext } from "react-unity-webgl"
 
 import { CinematicBlackHole } from "@/src/components/CinematicBlackHole"
-import { Button } from "@/components/ui/button"
 import { useGameStore } from "@/src/store/useGameStore"
 
 const orbitron = Orbitron({
@@ -19,340 +16,25 @@ const orbitron = Orbitron({
   weight: ["400", "600", "700"],
 })
 
-type UnityBattleProps = {
-  router: ReturnType<typeof useRouter>
-  token: string
-  userId: number
-  currentRoomId: string
-  selectedClass: string
-  buildUrls: {
-    loaderUrl: string
-    dataUrl: string
-    frameworkUrl: string
-    codeUrl: string
-  }
-}
-
-export type UnityBattleHandle = {
-  unload: () => Promise<void>
-}
-
-const UnityBattle = React.forwardRef<UnityBattleHandle, UnityBattleProps>(function UnityBattle(props, ref) {
-  const { router, token, userId, currentRoomId, selectedClass, buildUrls } = props
-
-  const { loaderUrl, dataUrl, frameworkUrl, codeUrl } = buildUrls
-
-  const { unityProvider, isLoaded, loadingProgression, sendMessage, unload } = useUnityContext({
-    loaderUrl,
-    dataUrl,
-    frameworkUrl,
-    codeUrl,
-  })
-
-  const unloadSafe = React.useCallback(async () => {
-    try {
-      await unload()
-    } catch (err) {
-      // React 18 Strict Mode 下可能在 Unity 尚未 ready 时触发 unmount
-      // 吞掉 unload 的 rejected，避免触发全局 unhandledrejection
-      console.warn("[UnityWebGL] unload rejected (ignored):", err)
-    }
-  }, [unload])
-
-  React.useImperativeHandle(ref, () => ({ unload: unloadSafe }), [unloadSafe])
-
-  React.useEffect(() => {
-    return () => {
-      void unloadSafe()
-    }
-  }, [unloadSafe])
-
-  const hasSentInitRef = React.useRef(false)
-  const percent = Math.max(0, Math.min(100, Math.round((loadingProgression ?? 0) * 100)))
-
-  const [loadingText, setLoadingText] = React.useState("启动引擎中...")
-  const stuckTimerRef = React.useRef<number | null>(null)
-  const wasmPatchedRef = React.useRef(false)
-
-  React.useEffect(() => {
-    if (isLoaded) return
-    const seq = ["启动引擎中...", "构造场景中..."]
-    let idx = 0
-    setLoadingText(seq[0])
-    const t = window.setInterval(() => {
-      idx = (idx + 1) % seq.length
-      setLoadingText(seq[idx])
-    }, 1200)
-    return () => window.clearInterval(t)
-  }, [isLoaded])
-
-  React.useEffect(() => {
-    console.debug("[UnityWebGL] loadingProgression =", loadingProgression, "percent =", percent, "isLoaded =", isLoaded)
-  }, [loadingProgression, percent, isLoaded])
-
-  React.useEffect(() => {
-    if (wasmPatchedRef.current) return
-    wasmPatchedRef.current = true
-
-    const w = window as unknown as { WebAssembly?: typeof WebAssembly }
-    if (!w.WebAssembly) return
-
-    const originalInstantiateStreaming = w.WebAssembly.instantiateStreaming?.bind(w.WebAssembly) as typeof WebAssembly.instantiateStreaming | undefined
-    const originalInstantiate = w.WebAssembly.instantiate?.bind(w.WebAssembly) as typeof WebAssembly.instantiate | undefined
-
-    if (originalInstantiateStreaming) {
-      w.WebAssembly.instantiateStreaming = (async (source, importObject) => {
-        try {
-          return await originalInstantiateStreaming(source as Parameters<typeof WebAssembly.instantiateStreaming>[0], importObject as Parameters<typeof WebAssembly.instantiateStreaming>[1])
-        } catch (err) {
-          console.error("[UnityWebGL] WebAssembly.instantiateStreaming failed", err)
-          throw err
-        }
-      }) as typeof WebAssembly.instantiateStreaming
-    }
-
-    if (originalInstantiate) {
-      w.WebAssembly.instantiate = (async (bufferSource, importObject) => {
-        try {
-          return await originalInstantiate(bufferSource as Parameters<typeof WebAssembly.instantiate>[0], importObject as Parameters<typeof WebAssembly.instantiate>[1])
-        } catch (err) {
-          console.error("[UnityWebGL] WebAssembly.instantiate failed", err)
-          throw err
-        }
-      }) as typeof WebAssembly.instantiate
-    }
-
-    const onError = (ev: Event) => console.error("[UnityWebGL] window.error", ev)
-    const onRejection = (ev: PromiseRejectionEvent) => console.error("[UnityWebGL] window.unhandledrejection", ev.reason)
-    
-    window.addEventListener("error", onError)
-    window.addEventListener("unhandledrejection", onRejection)
-    return () => {
-      window.removeEventListener("error", onError)
-      window.removeEventListener("unhandledrejection", onRejection)
-    }
-  }, [])
-
-  React.useEffect(() => {
-    if (isLoaded) {
-      if (stuckTimerRef.current) {
-        window.clearTimeout(stuckTimerRef.current)
-        stuckTimerRef.current = null
-      }
-      return
-    }
-
-    if (percent < 100) {
-      if (stuckTimerRef.current) {
-        window.clearTimeout(stuckTimerRef.current)
-        stuckTimerRef.current = null
-      }
-      return
-    }
-
-    if (stuckTimerRef.current) return
-    stuckTimerRef.current = window.setTimeout(() => {
-      if (!isLoaded) {
-        toast.error("Unity 引擎卡死，请尝试清理缓存或重启")
-      }
-      stuckTimerRef.current = null
-    }, 15000)
-
-    return () => {
-      if (stuckTimerRef.current) {
-        window.clearTimeout(stuckTimerRef.current)
-        stuckTimerRef.current = null
-      }
-    }
-  }, [percent, isLoaded])
-
-  React.useEffect(() => {
-    if (!isLoaded) return
-    if (hasSentInitRef.current) return
-    hasSentInitRef.current = true
-
-    if (!token || !userId || !currentRoomId || !selectedClass) {
-      toast.error("缺少进入战场所需数据，将返回大厅")
-      router.push("/lobby")
-      return
-    }
-
-    const battleWsBase = "ws://127.0.0.1:8081/ws"
-    const payload = JSON.stringify({
-      token,
-      userId,
-      roomId: currentRoomId,
-      selectedClass,
-      wsBase: battleWsBase,
-    })
-
-    try {
-      const ret = sendMessage("GameManager", "EnterBattle", payload)
-      ;(ret as unknown as { catch?: (fn: () => void) => void }).catch?.(() => {})
-    } catch {
-      toast.error("跨端通信失败：无法向 Unity 注入战场参数")
-    }
-  }, [isLoaded, token, userId, currentRoomId, selectedClass, sendMessage, router])
-
-  return (
-    <div className="relative h-full w-full overflow-hidden bg-transparent text-white">
-      <style>{`
-        @keyframes neonPulse {
-          0%, 100% { opacity: .55; transform: translateX(-25%); }
-          50% { opacity: 1; transform: translateX(25%); }
-        }
-        @keyframes scanline {
-          0% { transform: translateY(-120%); opacity: 0; }
-          12% { opacity: .65; }
-          100% { transform: translateY(120%); opacity: 0; }
-        }
-        @keyframes dataFlow {
-          0% { transform: translateX(-20%); opacity: .15; }
-          35% { opacity: .35; }
-          100% { transform: translateX(120%); opacity: 0; }
-        }
-        .cyberText {
-          background: linear-gradient(45deg, rgba(255,105,180,.95), #8E2DE2, rgba(0,229,255,.95));
-          -webkit-background-clip: text;
-          background-clip: text;
-          color: transparent;
-        }
-      `}</style>
-
-      <div
-        className={[
-          "absolute inset-0 h-full w-full transition-opacity duration-300",
-          isLoaded ? "opacity-100" : "opacity-0 pointer-events-none",
-        ].join(" ")}
-      >
-        <div className="absolute inset-0 h-full w-full">
-          <Unity
-            unityProvider={unityProvider}
-            style={{
-              width: "100%",
-              height: "100%",
-              display: "block",
-              background: "transparent",
-            }}
-          />
-        </div>
-      </div>
-
-      {isLoaded ? (
-        <div className="absolute left-4 top-4 z-20">
-          <Button
-            asChild
-            variant="secondary"
-            className="border border-white/12 bg-black/40 text-white backdrop-blur-md shadow-[0_0_0_1px_rgba(255,255,255,0.06)] hover:bg-black/55 hover:shadow-[0_0_0_1px_rgba(0,229,255,0.18),0_0_24px_rgba(142,45,226,0.14)]"
-          >
-            <Link href="/lobby">紧急撤离（返回大厅）</Link>
-          </Button>
-        </div>
-      ) : null}
-
-      {!isLoaded ? (
-        <div className="relative z-50 flex h-full w-full items-center justify-center">
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/15 via-black/45 to-black/80" />
-          <div className="relative z-50 w-full max-w-2xl px-6">
-            <div className="mx-auto rounded-2xl border border-white/10 bg-black/45 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_0_90px_rgba(142,45,226,0.14)] backdrop-blur">
-              <div className={[orbitron.className, "text-center"].join(" ")}>
-                <div className="text-xs tracking-[0.35em] text-white/50">ASTER NOVA</div>
-                <div className={["mt-3 text-2xl font-semibold tracking-tight cyberText", "drop-shadow-[0_0_18px_rgba(142,45,226,0.20)]"].join(" ")}>
-                  ASTERNOVA 核心引擎启动中… <span className="ml-2 text-white/70">{loadingText}</span>
-                </div>
-
-                <div className="mt-6 text-sm text-white/65">正在注入运行时数据流，请稍候</div>
-
-                <div className="mt-7">
-                  <div className="mb-3 flex items-center justify-center gap-3">
-                    <div className="h-px w-12 bg-white/10" />
-                    <div className={[orbitron.className, "cyberText text-lg font-bold tabular-nums"].join(" ")}>
-                      {percent}%
-                    </div>
-                    <div className="h-px w-12 bg-white/10" />
-                  </div>
-
-                  <div className="relative mx-auto max-w-xl">
-                    <div className="mb-2 flex items-center justify-between px-1">
-                      {Array.from({ length: 13 }).map((_, i) => (
-                        <span
-                          key={i}
-                          className={["inline-block w-[1px]", i % 3 === 0 ? "h-3 bg-white/22" : "h-2 bg-white/12"].join(" ")}
-                          style={{ opacity: i === 0 || i === 12 ? 0.35 : 0.55 }}
-                        />
-                      ))}
-                    </div>
-
-                    <div className="relative h-5 overflow-hidden rounded-full border border-white/10 bg-white/5 shadow-inner">
-                      <div
-                        className="pointer-events-none absolute inset-x-0 top-0 h-10"
-                        style={{
-                          background: "linear-gradient(180deg, rgba(0,229,255,0) 0%, rgba(0,229,255,0.18) 30%, rgba(255,105,180,0.0) 100%)",
-                          animation: "scanline 1.9s ease-in-out infinite",
-                        }}
-                      />
-                      <div
-                        className="pointer-events-none absolute left-0 top-1/2 h-2 w-24 -translate-y-1/2 rounded-full blur-sm"
-                        style={{
-                          background: "linear-gradient(90deg, rgba(255,105,180,0), rgba(142,45,226,0.65), rgba(0,229,255,0))",
-                          animation: "dataFlow 1.15s linear infinite",
-                        }}
-                      />
-                      <div
-                        className="relative h-full rounded-full"
-                        style={{
-                          width: `${percent}%`,
-                          background: "linear-gradient(90deg, rgba(255,105,180,0.95), #8E2DE2, rgba(0,229,255,0.95))",
-                          boxShadow: "0 0 0 1px rgba(255,255,255,0.10), 0 0 22px rgba(142,45,226,0.35), 0 0 30px rgba(0,229,255,0.18)",
-                        }}
-                      >
-                        <div
-                          className="pointer-events-none absolute inset-y-0 left-0 w-2/3 rounded-full blur-md"
-                          style={{
-                            background: "linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.30), rgba(255,255,255,0))",
-                            animation: "neonPulse 1.05s ease-in-out infinite",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-left text-xs text-white/65">
-                    <div className="mb-1 text-white/80">Unity Build 资源检查</div>
-                    <div className="font-mono text-white/60">
-                      loader: {loaderUrl} <br />
-                      data: {dataUrl} <br />
-                      framework: {frameworkUrl} <br />
-                      wasm: {codeUrl}
-                    </div>
-                    <div className="mt-2 text-white/55">
-                      若一直卡在加载：请把 Unity WebGL 导出的 <span className="font-mono text-white/70">Build.data / Build.framework.js / Build.wasm</span> 补齐。
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 flex justify-center">
-                <Button asChild className="bg-white/10 text-white hover:bg-white/15">
-                  <Link href="/lobby">返回大厅</Link>
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  )
-})
-
-UnityBattle.displayName = "UnityBattle"
-
 export default function ArenaPage() {
   const router = useRouter()
-  const unityBattleRef = React.useRef<UnityBattleHandle | null>(null)
+  const iframeRef = React.useRef<HTMLIFrameElement>(null)
+  const [isSceneReady, setIsSceneReady] = React.useState(false)
+  const [p1Status, setP1Status] = React.useState({ hp: 100, energy: 0 })
+  const [p2Status, setP2Status] = React.useState({ hp: 100, energy: 0 })
+  const [countdown, setCountdown] = React.useState<number | string | null>(null)
+  // ===== 新增代码 START =====
+  // 修改内容：新增对局结算状态，用于控制结算遮罩 UI
+  // 修改原因：需要在收到 Godot 的 game_over 后展示胜负并保持 4 秒后回大厅
+  // 影响范围：仅渲染层状态与 UI，不影响网络/路由逻辑
+  const [matchResult, setMatchResult] = React.useState<'victory' | 'defeat' | null>(null)
+  // ===== 新增代码 END =====
 
   const token = useGameStore((s) => s.token)
   const userId = useGameStore((s) => s.userId)
+  // ===== 新增代码 START =====
+  const username = useGameStore((s) => s.username)
+  // ===== 新增代码 END =====
   const currentRoomId = useGameStore((s) => s.currentRoomId)
   const selectedClass = useGameStore((s) => s.selectedClass)
   const sessionReadyForBattle = useGameStore((s) => s.sessionReadyForBattle)
@@ -379,10 +61,112 @@ export default function ArenaPage() {
     }
   }, [sessionReadyForBattle, canEnterArena, router])
 
+  const handleGodotLoad = React.useCallback(() => {
+    if (!iframeRef.current || !iframeRef.current.contentWindow) return
+    // 永久治本方案：直接用 React 潜入 iframe 内部，把 Godot 的加载条给删掉！
+    try {
+      const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow.document
+      if (iframeDoc) {
+        const style = iframeDoc.createElement("style")
+        style.innerHTML = "#status { display: none !important; } canvas { background-color: transparent !important; }"
+        iframeDoc.head.appendChild(style)
+        console.log("[ArenaPage] 已成功向 Godot 注入静默样式")
+      }
+    } catch (err) {
+      console.warn("[ArenaPage] 无法修改 iframe 内部样式 (可能跨域)", err)
+    }
+
+    // ===== 新增代码 START =====
+    type EnterBattlePayload = {
+      token: string
+      userId: number
+      username: string
+      roomId: string
+      selectedClass: string
+      wsBase: string
+    }
+    // ===== 新增代码 END =====
+    const payload: EnterBattlePayload = {
+      token,
+      userId,
+      // ===== 新增代码 START =====
+      username,
+      // ===== 新增代码 END =====
+      roomId: currentRoomId,
+      selectedClass,
+      wsBase: "ws://127.0.0.1:8081/ws",
+    }
+
+    // 使用轮询等待 Godot 引擎初始化并挂载方法
+    const tryInject = () => {
+      const cw = iframeRef.current?.contentWindow as (Window & { enterBattle?: (json: string) => void }) | null
+      if (cw && typeof cw.enterBattle === "function") {
+        try {
+          cw.enterBattle(JSON.stringify(payload))
+          console.log("[ArenaPage] 已向 Godot 注入战场参数")
+        } catch (err) {
+          console.error("[ArenaPage] 向 Godot 注入参数失败:", err)
+        }
+      } else {
+        // 如果还没有挂载上，等待 100ms 后重试
+        setTimeout(tryInject, 100)
+      }
+    }
+
+    tryInject()
+  }, [token, userId, username, currentRoomId, selectedClass])
+
   React.useEffect(() => {
-    const onBattleResult = async (event: Event) => {
-      const customEvent = event as CustomEvent<{ resultType?: string }>
-      const resultType = customEvent?.detail?.resultType ?? ""
+    const handleBattleResult = (event: Event) => {
+      const customEvent = event as CustomEvent<{ resultType?: string; payload?: unknown }>
+      const { resultType = "", payload } = customEvent.detail ?? {}
+
+      if (resultType === "engine_ready") {
+        setIsSceneReady(true)
+        return
+      }
+
+      if (resultType === "player_status") {
+        try {
+          const data =
+            typeof payload === "string"
+              ? (JSON.parse(payload as string) as { is_local: boolean; hp: number; energy: number })
+              : (payload as { is_local: boolean; hp: number; energy: number })
+          if (data.is_local) {
+            setP1Status({ hp: data.hp, energy: data.energy })
+          } else {
+            setP2Status({ hp: data.hp, energy: data.energy })
+          }
+        } catch (e) {
+          console.error("解析状态失败", e)
+        }
+        return
+      }
+
+      // ===== 新增代码 START =====
+      // 修改内容：拦截 Godot 发来的 game_over 信号，驱动结算 UI 并在演出结束后回大厅
+      // 修改原因：与后端的 game_over 广播对齐，确保慢动作结束后把胜负结果推给 React
+      // 影响范围：仅当 resultType === "game_over" 时中断默认 toast + router 行为
+      if (resultType === "game_over") {
+        try {
+          const data = typeof payload === "string" ? JSON.parse(payload) : payload
+          const winnerId = (data as { winner_id?: number | string }).winner_id
+          const isVictory = Number(winnerId) === userId
+          setMatchResult(isVictory ? "victory" : "defeat")
+
+          // 停留 4 秒让玩家装 X，然后自动退回大厅
+          setTimeout(() => {
+            router.replace("/lobby")
+          }, 4000)
+        } catch (e) {
+          console.error("解析结算失败", e)
+        }
+        return
+      }
+      // ===== 新增代码 END =====
+
+      console.log("收到 Godot 战斗结果:", resultType, payload)
+
       if (resultType === "win" || resultType === "victory" || resultType === "opponent_left") {
         toast.success("对局结束：对手离线，你已获胜")
       } else if (resultType) {
@@ -390,14 +174,37 @@ export default function ArenaPage() {
       } else {
         toast.info("对局结束")
       }
-      try {
-        await unityBattleRef.current?.unload()
-      } catch {}
+
       router.replace("/lobby")
     }
-    window.addEventListener("unity:battle_result", onBattleResult)
-    return () => window.removeEventListener("unity:battle_result", onBattleResult)
+
+    window.addEventListener("unity:battle_result", handleBattleResult)
+    return () => window.removeEventListener("unity:battle_result", handleBattleResult)
   }, [router])
+
+  React.useEffect(() => {
+    if (isSceneReady) {
+      setCountdown(3)
+      let count = 3
+      const interval = setInterval(() => {
+        count -= 1
+        if (count > 0) {
+          setCountdown(count)
+        } else if (count === 0) {
+          setCountdown("FIGHT!")
+          // 呼叫 Godot 解除玩家冻结
+          try {
+            const cw = iframeRef.current?.contentWindow as any
+            cw?.startFight?.()
+          } catch (e) {}
+        } else {
+          setCountdown(null)
+          clearInterval(interval)
+        }
+      }, 1000)
+      return () => clearInterval(interval)
+    }
+  }, [isSceneReady])
 
   React.useEffect(() => {
     if (!canEnterArena) return
@@ -409,170 +216,332 @@ export default function ArenaPage() {
           navigator.sendBeacon("/api/proxy/battle_forfeit", blob)
         } catch {}
       }
-      void unityBattleRef.current?.unload().catch(() => {})
     }
     window.addEventListener("beforeunload", onBeforeUnload)
-    
+
     // 关键修正：坚决不在这里重置 sessionReadyForBattle！全权交给内存生命周期自然销毁
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload)
     }
   }, [canEnterArena])
 
-  const [errorLog, setErrorLog] = React.useState<string[]>([])
-
-  React.useEffect(() => {
-    const push = (msg: string) => setErrorLog((prev) => [...prev, msg].slice(-30))
-
-    const onErrorEvent = (event: ErrorEvent) => {
-      const message = event.message || event.type || "UnknownError"
-      const extra = event.filename ? ` @ ${event.filename}:${event.lineno ?? "?"}:${event.colno ?? "?"}` : ""
-      const stack = event.error instanceof Error ? event.error.stack : undefined
-      push(`[window.onerror] ${message}${extra}${stack ? `\n${stack}` : ""}`)
-    }
-
-    const onUnhandledRejection = (ev: PromiseRejectionEvent) => {
-      const reason = ev?.reason
-      const msg = reason instanceof Error ? `${reason.name}: ${reason.message}\n${reason.stack ?? ""}` : typeof reason === "string" ? reason : JSON.stringify(reason)
-      push(`[unhandledrejection] ${msg}`)
-    }
-
-    window.addEventListener("error", onErrorEvent)
-    window.addEventListener("unhandledrejection", onUnhandledRejection)
-    return () => {
-      window.removeEventListener("error", onErrorEvent)
-      window.removeEventListener("unhandledrejection", onUnhandledRejection)
-    }
-  }, [])
-
-  const [loaderCheckState, setLoaderCheckState] = React.useState<"checking" | "ok" | "not_found">("checking")
-  const [resolvedBuildUrls, setResolvedBuildUrls] = React.useState<{ loaderUrl: string, dataUrl: string, frameworkUrl: string, codeUrl: string } | null>(null)
-  const [precheckLoadingText, setPrecheckLoadingText] = React.useState("启动引擎中...")
-
-  React.useEffect(() => {
-    let cancelled = false
-    const controller = new AbortController()
-
-    const run = async () => {
-      try {
-        const buildBase = "/unity/Build"
-        const candidates = [
-          { loaderUrl: `${buildBase}/Build.loader.js`, dataUrl: `${buildBase}/Build.data`, frameworkUrl: `${buildBase}/Build.framework.js`, codeUrl: `${buildBase}/Build.wasm` },
-          { loaderUrl: `${buildBase}/Build.loader.js`, dataUrl: `${buildBase}/Build.data.unityweb`, frameworkUrl: `${buildBase}/Build.framework.js.unityweb`, codeUrl: `${buildBase}/Build.wasm.unityweb` },
-        ]
-
-        for (const candidate of candidates) {
-          const required = [candidate.loaderUrl, candidate.dataUrl, candidate.frameworkUrl, candidate.codeUrl]
-          let allOk = true
-          for (const url of required) {
-            const res = await fetch(url, { method: "HEAD", signal: controller.signal })
-            if (cancelled) return
-            if (res.status === 404) {
-              allOk = false
-              break
-            }
-          }
-          if (allOk) {
-            setResolvedBuildUrls(candidate)
-            setLoaderCheckState("ok")
-            return
-          }
-        }
-        setLoaderCheckState("not_found")
-      } catch {
-        if (!cancelled) setLoaderCheckState("ok")
-      }
-    }
-
-    run()
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [])
-
-  React.useEffect(() => {
-    if (loaderCheckState === "ok" || loaderCheckState === "not_found") return
-    const seq = ["启动引擎中...", "构造场景中..."]
-    let idx = 0
-    setPrecheckLoadingText(seq[0])
-    const t = window.setInterval(() => {
-      idx = (idx + 1) % seq.length
-      setPrecheckLoadingText(seq[idx])
-    }, 1200)
-    return () => window.clearInterval(t)
-  }, [loaderCheckState])
-
   if (!canEnterArena) {
     return null
   }
 
-  if (loaderCheckState === "not_found") {
-    return (
-      <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
-        {errorLog.length ? (
-          <div className="fixed left-0 right-0 top-0 z-50 max-h-[45vh] overflow-auto bg-red-500/20 p-3">
-            <div className="rounded-lg bg-white p-3">
-              <div className="mb-2 text-sm font-semibold text-red-600">Runtime Errors</div>
-              <pre className="whitespace-pre-wrap break-words text-xs text-red-700">{errorLog.join("\n\n---\n\n")}</pre>
-            </div>
-          </div>
-        ) : null}
-        <CinematicBlackHole interactive={false} intensity={0.9} opacity={0.22} className="pointer-events-none absolute inset-0" />
-        <div className="relative z-10 flex h-full w-full items-center justify-center p-6">
-          <div className={[orbitron.className, "w-full max-w-2xl rounded-2xl border border-red-400/30 bg-red-950/40 p-8 shadow-[0_0_120px_rgba(255,0,0,0.18)] backdrop-blur"].join(" ")}>
-            <div className="text-center text-2xl font-semibold text-red-200">❌ 严重错误</div>
-            <div className="mt-4 text-center text-sm text-red-100/80">❌ 找不到解压后的 Unity 文件！请在 Unity 中禁用 Compression Format 并重新 Build！</div>
-            <div className="mt-6 flex justify-center">
-              <Button asChild className="bg-white/10 text-white hover:bg-white/15">
-                <Link href="/lobby">返回大厅</Link>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
-      {errorLog.length ? (
-        <div className="fixed left-0 right-0 top-0 z-50 max-h-[45vh] overflow-auto bg-red-500/20 p-3">
-          <div className="rounded-lg bg-white p-3">
-            <div className="mb-2 text-sm font-semibold text-red-600">Runtime Errors</div>
-            <pre className="whitespace-pre-wrap break-words text-xs text-red-700">{errorLog.join("\n\n---\n\n")}</pre>
-          </div>
-        </div>
-      ) : null}
-
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            @keyframes wave-move {
+              0% { mask-position-x: 0%; -webkit-mask-position-x: 0%; }
+              100% { mask-position-x: 200%; -webkit-mask-position-x: 200%; }
+            }
+            .wave-move-anim {
+              mask-size: 100% 100%; -webkit-mask-size: 100% 100%;
+              animation: wave-move 3s linear infinite !important;
+            }
+          `,
+        }}
+      />
       <CinematicBlackHole interactive={false} intensity={0.95} opacity={0.3} className="pointer-events-none absolute inset-0" />
-      {loaderCheckState === "ok" ? (
-        resolvedBuildUrls ? (
-          <UnityBattle
-            ref={unityBattleRef}
-            router={router}
-            token={token}
-            userId={userId}
-            currentRoomId={currentRoomId}
-            selectedClass={selectedClass}
-            buildUrls={resolvedBuildUrls}
-          />
-        ) : null
-      ) : (
+
+      <div
+        className={`absolute inset-0 h-full w-full transition-opacity duration-1000 ${isSceneReady ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+      >
+        <iframe
+          ref={iframeRef}
+          src="/godot/GoDot_game.html"
+          className="w-full h-full border-none outline-none"
+          onLoad={handleGodotLoad}
+        />
+      </div>
+
+      {!isSceneReady && (
         <div className="relative z-10 flex h-full w-full items-center justify-center">
           <div className="w-full max-w-2xl px-6">
             <div className="mx-auto rounded-2xl border border-white/10 bg-black/45 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_0_90px_rgba(142,45,226,0.14)] backdrop-blur">
               <div className={[orbitron.className, "text-center"].join(" ")}>
                 <div className="text-xs tracking-[0.35em] text-white/50">ASTER NOVA</div>
                 <div className="mt-3 text-2xl font-semibold tracking-tight text-cyan-100 drop-shadow-[0_0_18px_rgba(142,45,226,0.20)]">
-                  启动预检中… <span className="ml-2 text-white/70">{precheckLoadingText}</span>
+                  ASTERNOVA 核心引擎启动中…
                 </div>
-                <div className="mt-4 text-sm text-white/65">正在探测 Unity loader 资源是否可访问</div>
+                <div className="mt-4 text-sm text-white/65">正在建立神经链路，请稍候...</div>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {countdown && (
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm transition-all duration-300">
+          <div
+            key={countdown}
+            className={[
+              orbitron.className,
+              "animate-in zoom-in-50 fade-in duration-500 text-[10rem] font-black italic tracking-tighter text-transparent",
+            ].join(" ")}
+            style={{
+              WebkitTextStroke: "2px rgba(255,255,255,0.8)",
+              backgroundImage: "linear-gradient(to bottom right, #f9a8d4, #a855f7, #67e8f9)",
+              WebkitBackgroundClip: "text",
+              filter: "drop-shadow(0 0 40px rgba(168,85,247,0.6))",
+            }}
+          >
+            {countdown}
+          </div>
+        </div>
+      )}
+
+      {isSceneReady && (
+        <>
+          {/* 大招 Q 按键 (赛博液体波纹 - 绝对防御级内联样式) */}
+          <div
+            className="absolute left-4 top-24 z-50 flex items-center justify-center pointer-events-none transition-all duration-300"
+            style={{
+              width: "72px",
+              height: "72px",
+              filter: p1Status.energy >= 15 ? "drop-shadow(0 0 25px rgba(236,72,153,0.95))" : "drop-shadow(0 0 8px rgba(0,0,0,0.7))",
+              scale: p1Status.energy >= 15 ? "1.15" : "1.0",
+            }}
+          >
+            <div style={{ position: "absolute", inset: 0, borderRadius: "999px", border: "3px solid rgba(255,255,255,0.3)", backgroundColor: "rgba(0,0,0,0.85)", boxShadow: "inset 0 0 15px rgba(236,72,153,0.3)", backdropFilter: "blur(8px)" }} />
+
+            <div style={{ position: "absolute", inset: "4px", overflow: "hidden", borderRadius: "999px" }}>
+              <div
+                className="wave-move-anim"
+                style={{
+                  position: "absolute",
+                  left: "-50%",
+                  width: "200%",
+                  bottom: "-25%",
+                  height: "100%",
+                  backgroundImage: "linear-gradient(to top right, #f472b6, #60a5fa)",
+                  transform: `translateY(-${(p1Status.energy / 15) * 100}%)`,
+                  transition: "transform 0.3s ease-out, opacity 0.3s",
+                  opacity: p1Status.energy >= 15 ? "1" : "0.7",
+                  maskImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 1200 120\' preserveAspectRatio=\'none\'%3E%3Cpath d=\'M321.39,56.44c58-10.79,114.16-30.13,172-41.86,82.39-16.72,168.19-17.73,250.45-.39C823.78,31,906.67,72,985.66,92.83c70.05,18.48,146.53,26.09,214.34,3V0H0V120H282.65C297.82,95.68,307.39,73.19,321.39,56.44Z\' style=\'fill:%23000;\'%3E%3C/path%3E%3C/svg%3E")',
+                  WebkitMaskImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 1200 120\' preserveAspectRatio=\'none\'%3E%3Cpath d=\'M321.39,56.44c58-10.79,114.16-30.13,172-41.86,82.39-16.72,168.19-17.73,250.45-.39C823.78,31,906.67,72,985.66,92.83c70.05,18.48,146.53,26.09,214.34,3V0H0V120H282.65C297.82,95.68,307.39,73.19,321.39,56.44Z\' style=\'fill:%23000;\'%3E%3C/path%3E%3C/svg%3E")',
+                  maskRepeat: "repeat-x",
+                  WebkitMaskRepeat: "repeat-x",
+                }}
+              />
+            </div>
+
+            <span
+              className={[orbitron.className, "absolute z-10 text-5xl font-black italic"].join(" ")}
+              style={{
+                color: "#fff",
+                transform: "translateY(1px)",
+                filter: p1Status.energy >= 15 ? "drop-shadow(0 0 15px rgba(255,255,255,0.9))" : "drop-shadow(0 0 2px rgba(255,255,255,0.4))",
+              }}
+            >
+              Q
+            </span>
+          </div>
+
+          {/* P1 本地玩家 (左上角，往下挪一点) */}
+          <div className="pointer-events-none absolute left-28 top-28 z-40 flex w-[40vw] max-w-[450px] flex-col gap-2">
+            <div className="flex items-end justify-between px-2" style={{ textShadow: "0 0 8px rgba(0,0,0,0.8)" }}>
+              <span className={[orbitron.className, "text-2xl font-black tracking-widest text-white"].join(" ")}>{username || "PLAYER 1"}</span>
+              <span className={[orbitron.className, "text-sm font-bold tracking-widest text-yellow-400 drop-shadow-md"].join(" ")}>
+                {p1Status.energy >= 15 ? "ULTIMATE READY [Q]" : "ENERGY"}
+              </span>
+            </div>
+            {/* P1 主血条 */}
+            <div
+              style={{
+                height: "28px",
+                width: "100%",
+                transform: "skewX(-12deg)",
+                overflow: "hidden",
+                borderRadius: "4px",
+                border: "2px solid rgba(255,255,255,0.3)",
+                backgroundColor: "rgba(0,0,0,0.8)",
+                boxShadow: "0 0 15px rgba(0,0,0,0.8)",
+                backdropFilter: "blur(12px)",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${p1Status.hp}%`,
+                  backgroundImage: "linear-gradient(to right, #db2777, #f43f5e)",
+                  transition: "width 0.3s ease-out",
+                }}
+              />
+            </div>
+            {/* P1 能量条 */}
+            <div
+              style={{
+                height: "12px",
+                width: "100%",
+                transform: "skewX(-12deg)",
+                overflow: "hidden",
+                borderRadius: "4px",
+                border: "1px solid rgba(255,255,255,0.2)",
+                backgroundColor: "rgba(0,0,0,0.8)",
+                boxShadow: "0 0 10px rgba(0,0,0,0.8)",
+                backdropFilter: "blur(12px)",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${(p1Status.energy / 15) * 100}%`,
+                  backgroundImage: "linear-gradient(to right, #facc15, #22d3ee)",
+                  transition: "width 0.3s ease-out",
+                }}
+              />
+            </div>
+          </div>
+
+          {/* P2 敌方玩家 (右上角) */}
+          <div className="pointer-events-none absolute right-6 top-20 z-50 flex w-[40vw] max-w-[450px] flex-col items-end gap-2">
+            <div className="flex w-full flex-row-reverse items-end justify-between px-2" style={{ textShadow: "0 0 8px rgba(0,0,0,0.8)" }}>
+              <span className={[orbitron.className, "text-2xl font-black tracking-widest text-red-400"].join(" ")}>ENEMY</span>
+            </div>
+            {/* P2 主血条 */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                height: "28px",
+                width: "100%",
+                transform: "skewX(12deg)",
+                overflow: "hidden",
+                borderRadius: "4px",
+                border: "2px solid rgba(255,255,255,0.3)",
+                backgroundColor: "rgba(0,0,0,0.8)",
+                boxShadow: "0 0 15px rgba(0,0,0,0.8)",
+                backdropFilter: "blur(12px)",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${p2Status.hp}%`,
+                  backgroundImage: "linear-gradient(to left, #dc2626, #f97316)",
+                  transition: "width 0.3s ease-out",
+                }}
+              />
+            </div>
+            {/* P2 能量条 */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                height: "12px",
+                width: "100%",
+                transform: "skewX(12deg)",
+                overflow: "hidden",
+                borderRadius: "4px",
+                border: "1px solid rgba(255,255,255,0.2)",
+                backgroundColor: "rgba(0,0,0,0.8)",
+                boxShadow: "0 0 10px rgba(0,0,0,0.8)",
+                backdropFilter: "blur(12px)",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${(p2Status.energy / 15) * 100}%`,
+                  backgroundImage: "linear-gradient(to left, #facc15, #22d3ee)",
+                  transition: "width 0.3s ease-out",
+                }}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ===== 新增代码 START ===== */}
+      {/* 修改内容：全屏赛博结算遮罩层（仅展示，不改变计时/跳转逻辑） */}
+      {matchResult && (
+        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-1000">
+          <div
+            className={[orbitron.className, "relative flex flex-col items-center gap-6"].join(" ")}
+            style={{
+              padding: "2.2rem 2.4rem",
+              borderRadius: 24,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background:
+                matchResult === "victory"
+                  ? "radial-gradient(1000px 420px at 50% 40%, rgba(34,211,238,0.25), rgba(0,0,0,0) 60%), rgba(0,0,0,0.35)"
+                  : "radial-gradient(1000px 420px at 50% 40%, rgba(220,38,38,0.22), rgba(0,0,0,0) 60%), rgba(0,0,0,0.35)",
+              boxShadow:
+                matchResult === "victory"
+                  ? "0 0 60px rgba(34,211,238,0.20), inset 0 0 0 1px rgba(255,255,255,0.08)"
+                  : "0 0 60px rgba(220,38,38,0.18), inset 0 0 0 1px rgba(255,255,255,0.08)",
+            }}
+          >
+            {/* 背景扫描线 */}
+            <div className="pointer-events-none absolute inset-0 rounded-[24px] overflow-hidden" aria-hidden="true">
+              <div
+                className="absolute inset-0"
+                style={{
+                  background:
+                    "repeating-linear-gradient(to bottom, rgba(255,255,255,0.08), rgba(255,255,255,0.08) 1px, rgba(0,0,0,0) 3px, rgba(0,0,0,0) 6px)",
+                  opacity: 0.25,
+                  mixBlendMode: "overlay",
+                }}
+              />
+              <div
+                className="absolute left-0 right-0 h-1/3"
+                style={{
+                  top: "25%",
+                  background: matchResult === "victory" ? "rgba(34,211,238,0.25)" : "rgba(220,38,38,0.22)",
+                  filter: "blur(14px)",
+                  transform: "translateY(0)",
+                  animation: "pulse-scan 1.8s ease-in-out infinite",
+                }}
+              />
+              <style
+                dangerouslySetInnerHTML={{
+                  __html: `
+                    @keyframes pulse-scan {
+                      0% { transform: translateY(-12%); opacity: 0.55; }
+                      50% { transform: translateY(26%); opacity: 0.90; }
+                      100% { transform: translateY(-12%); opacity: 0.55; }
+                    }
+                  `,
+                }}
+              />
+            </div>
+
+            <div className="relative">
+              <div
+                className={`text-[6.6rem] font-black italic tracking-widest ${
+                  matchResult === "victory"
+                    ? "text-cyan-400 drop-shadow-[0_0_50px_rgba(34,211,238,0.8)]"
+                    : "text-red-600 drop-shadow-[0_0_50px_rgba(220,38,38,0.8)]"
+                }`}
+              >
+                {matchResult === "victory" ? "VICTORY" : "DEFEAT"}
+              </div>
+              <div className="mt-4 h-1 w-96 bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+            </div>
+
+            <div className="relative flex flex-col items-center gap-3">
+              <div
+                className="text-sm font-bold tracking-[0.45em] text-white/70 animate-pulse"
+                style={{ textShadow: "0 0 18px rgba(255,255,255,0.15)" }}
+              >
+                RETURNING TO LOBBY...
+              </div>
+              <div
+                className="h-[2px] w-72 bg-gradient-to-r from-transparent via-white/60 to-transparent"
+                style={{ opacity: 0.55 }}
+              />
+              <div className="text-xs text-white/55 tracking-wide">
+                你看到慢动作不是bug，是结算特效
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ===== 新增代码 END ===== */}
     </div>
   )
 }
