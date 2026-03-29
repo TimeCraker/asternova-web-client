@@ -6,6 +6,8 @@ import { toast } from "sonner"
 import { Orbitron } from "next/font/google"
 
 import { CinematicBlackHole } from "@/src/components/CinematicBlackHole"
+import { apiV1BaseUrl } from "@/src/config/public-env"
+import { useMobileGameViewport } from "@/src/hooks/useMobileGameViewport"
 import { useGameStore } from "@/src/store/useGameStore"
 
 const orbitron = Orbitron({
@@ -35,6 +37,8 @@ export default function ArenaPage() {
   const currentRoomId = useGameStore((s) => s.currentRoomId)
   const selectedClass = useGameStore((s) => s.selectedClass)
   const sessionReadyForBattle = useGameStore((s) => s.sessionReadyForBattle)
+
+  const { isMobile, shouldShowLandscapeHint } = useMobileGameViewport()
 
   const canEnterArena = Boolean(token && userId && currentRoomId && sessionReadyForBattle)
 
@@ -81,6 +85,7 @@ export default function ArenaPage() {
       roomId: string
       selectedClass: string
       wsBase: string
+      isMobile: boolean
     }
     // ===== 新增代码 END =====
     const payload: EnterBattlePayload = {
@@ -91,7 +96,8 @@ export default function ArenaPage() {
       // ===== 新增代码 END =====
       roomId: currentRoomId,
       selectedClass,
-      wsBase: "ws://127.0.0.1:8081/ws",
+      wsBase: process.env.NEXT_PUBLIC_WS_URL ?? "",
+      isMobile,
     }
 
     // 使用轮询等待 Godot 引擎初始化并挂载方法
@@ -111,7 +117,7 @@ export default function ArenaPage() {
     }
 
     tryInject()
-  }, [token, userId, username, currentRoomId, selectedClass])
+  }, [token, userId, username, currentRoomId, selectedClass, isMobile])
 
   React.useEffect(() => {
     const handleBattleResult = (event: Event) => {
@@ -210,7 +216,7 @@ export default function ArenaPage() {
       if (t && rid) {
         try {
           const blob = new Blob([JSON.stringify({ roomId: rid, reason: "page_unload" })], { type: "application/json" })
-          navigator.sendBeacon("/api/proxy/battle_forfeit", blob)
+          navigator.sendBeacon(`${apiV1BaseUrl}/battle_forfeit`, blob)
         } catch {}
       }
     }
@@ -228,6 +234,22 @@ export default function ArenaPage() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
+      {shouldShowLandscapeHint && (
+        <div
+          className="absolute inset-0 z-[200] flex flex-col items-center justify-center gap-6 bg-black/92 px-8 text-center backdrop-blur-md"
+          role="dialog"
+          aria-live="polite"
+          aria-label="请横屏游戏"
+        >
+          <div
+            className={[orbitron.className, "max-w-md text-lg font-semibold leading-relaxed text-cyan-100/95"].join(" ")}
+            style={{ textShadow: "0 0 24px rgba(34,211,238,0.35)" }}
+          >
+            为了获得最佳游戏体验，请关闭系统的屏幕旋转锁定，并将手机横置。
+          </div>
+          <div className="text-sm text-white/55">横屏后即可继续战斗</div>
+        </div>
+      )}
       <style
         dangerouslySetInnerHTML={{
           __html: `

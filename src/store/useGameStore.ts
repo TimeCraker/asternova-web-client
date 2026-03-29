@@ -53,6 +53,7 @@ export const useGameStore = create<GameState>()(
         set({
           token: '',
           userId: 0,
+          username: '',
           sessionReadyForBattle: false,
         }),
     }),
@@ -65,6 +66,7 @@ export const useGameStore = create<GameState>()(
       partialize: (state) => ({
         token: state.token,
         userId: state.userId,
+        username: state.username,
         selectedClass: state.selectedClass,
         currentRoomId: state.currentRoomId,
       }),

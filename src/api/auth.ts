@@ -1,8 +1,10 @@
 import axios, { AxiosError } from "axios"
 
+import { apiV1BaseUrl } from "@/src/config/public-env"
+
 // ===== 新增代码 START =====
-// 使用 Next.js 本地代理路径，避免直接访问 127.0.0.1:8081，彻底规避浏览器 Private Network / CORS 报错
-const API_BASE_URL = "/api/proxy"
+// 使用 process.env.NEXT_PUBLIC_API_URL（经 public-env 归一化）作为 REST 根，对应 /api/v1
+const API_BASE_URL = apiV1BaseUrl
 
 export const authApi = axios.create({
   baseURL: API_BASE_URL,
@@ -43,16 +45,29 @@ export async function register(
   password: string,
   email: string,
   code: string,
-): Promise<{ id: number; message: string }> {
+): Promise<{ message: string; token: string; user: { id: number; username: string; email: string } }> {
   const res = await authApi.post("/register", { username, password, email, code })
-  return res.data as { id: number; message: string }
+  return res.data as { message: string; token: string; user: { id: number; username: string; email: string } }
 }
 
 export async function login(
-  username: string,
+  identifier: string,
   password: string,
-): Promise<{ message: string; token: string }> {
-  const res = await authApi.post("/login", { username, password })
-  return res.data as { message: string; token: string }
+): Promise<{ message: string; token: string; user?: { id: number; username: string; email: string } }> {
+  const res = await authApi.post("/login", { identifier, password })
+  return res.data as { message: string; token: string; user?: { id: number; username: string; email: string } }
+}
+
+export async function loginWithEmail(
+  email: string,
+  code: string,
+): Promise<
+  | { message: string; token: string; user?: { id: number; username: string; email: string } }
+  | { action: "require_setup"; message: string }
+> {
+  const res = await authApi.post("/login_with_email", { email, code })
+  return res.data as
+    | { message: string; token: string; user?: { id: number; username: string; email: string } }
+    | { action: "require_setup"; message: string }
 }
 

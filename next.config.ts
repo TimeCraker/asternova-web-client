@@ -1,11 +1,60 @@
 import type { NextConfig } from "next";
+import path from "path";
+import { fileURLToPath } from "url";
+
+/** 与 next.config 同目录 = 真正的应用根（勿依赖 process.cwd，避免在 Desktop 等父目录里跑 dev 时解析错） */
+const appRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  turbopack: {
+    root: appRoot,
+    resolveAlias: {
+      tailwindcss: path.join(appRoot, "node_modules", "tailwindcss"),
+      "tw-animate-css": path.join(
+        appRoot,
+        "node_modules",
+        "tw-animate-css",
+        "dist",
+        "tw-animate.css",
+      ),
+      "shadcn/tailwind.css": path.join(
+        appRoot,
+        "node_modules",
+        "shadcn",
+        "dist",
+        "tailwind.css",
+      ),
+    },
+  },
+  webpack: (config) => {
+    config.resolve = config.resolve ?? {};
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      tailwindcss: path.join(appRoot, "node_modules", "tailwindcss"),
+      "tw-animate-css": path.join(
+        appRoot,
+        "node_modules",
+        "tw-animate-css",
+        "dist",
+        "tw-animate.css",
+      ),
+      "shadcn/tailwind.css": path.join(
+        appRoot,
+        "node_modules",
+        "shadcn",
+        "dist",
+        "tailwind.css",
+      ),
+    };
+    return config;
+  },
   async headers() {
     return [
       {
-        source: "/unity/Build/:file*\\.data\\.gz",
+        source: "/godot/:file*\\.data\\.gz",
         headers: [
           { key: "Content-Type", value: "application/octet-stream" },
           { key: "Content-Encoding", value: "gzip" },
@@ -13,7 +62,7 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: "/unity/Build/:file*\\.framework\\.js\\.gz",
+        source: "/godot/:file*\\.js\\.gz",
         headers: [
           { key: "Content-Type", value: "application/javascript; charset=utf-8" },
           { key: "Content-Encoding", value: "gzip" },
@@ -21,7 +70,7 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: "/unity/Build/:file*\\.wasm\\.gz",
+        source: "/godot/:file*\\.wasm\\.gz",
         headers: [
           { key: "Content-Type", value: "application/wasm" },
           { key: "Content-Encoding", value: "gzip" },
@@ -31,12 +80,14 @@ const nextConfig: NextConfig = {
     ];
   },
   // ===== 新增代码 START =====
-  // 通过 Next.js Rewrite 将前端 /api/proxy/:path* 请求代理到本地 Go 网关，消除浏览器的 Private Network / CORS 报错
+  // 与 .env.local 中 NEXT_PUBLIC_API_URL 对齐：将遗留 /api/proxy 请求转发到同一后端
   async rewrites() {
+    const root = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
+    if (!root) return [];
     return [
       {
         source: "/api/proxy/:path*",
-        destination: "http://127.0.0.1:8081/api/v1/:path*",
+        destination: `${root}/api/v1/:path*`,
       },
     ];
   },

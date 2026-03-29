@@ -2,18 +2,76 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
+import { AnimatePresence, LayoutGroup, motion } from "framer-motion"
+import {
+  ChevronRight,
+  Cpu,
+  Footprints,
+  Gamepad2,
+  HeartPulse,
+  IdCard,
+  Layers,
+  Loader2,
+  MoonStar,
+  Orbit,
+  Shield,
+  Sparkles,
+  Swords,
+  Target,
+  Zap,
+} from "lucide-react"
 import { toast } from "sonner"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { LobbyAvatarPickerModal, LobbyPresetAvatar, useLobbyAvatar } from "@/src/components/lobby/LobbyAvatars"
+import { wsUrl } from "@/src/config/public-env"
 import { useGameStore } from "@/src/store/useGameStore"
+import { useGameStoreRehydrated } from "@/src/store/useGameStoreHydration"
+
+const uiFont = 'system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif'
+
+const easeOut = [0.22, 1, 0.36, 1] as const
+
+const pageVariants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.06, delayChildren: 0.04 },
+  },
+}
+
+const sectionVariants = {
+  hidden: { opacity: 0, y: 18 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.5, ease: easeOut },
+  },
+}
+
+const arcadeTileVariants = {
+  hidden: { opacity: 0, y: 20 },
+  show: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: 0.05 * i, duration: 0.45, ease: easeOut },
+  }),
+}
+
+const highlightVariants = {
+  hidden: { opacity: 0, x: -8 },
+  show: (i: number) => ({
+    opacity: 1,
+    x: 0,
+    transition: { delay: 0.06 + i * 0.05, duration: 0.35, ease: easeOut },
+  }),
+}
 
 type RoleOption = {
   id: string
   name: string
   tagline: string
   highlights: string[]
-  accentClassName: string
+  Icon: React.ComponentType<{ className?: string }>
 }
 
 const ROLES: RoleOption[] = [
@@ -22,30 +80,101 @@ const ROLES: RoleOption[] = [
     name: "极速者",
     tagline: "光速突进，先手压制",
     highlights: ["高机动", "强突袭", "灵活走位"],
-    accentClassName: "from-cyan-400/20 via-sky-400/10 to-transparent",
+    Icon: Zap,
   },
   {
     id: "Role2_Cursemancer",
     name: "诅咒师",
     tagline: "侵蚀心智，持续消耗",
     highlights: ["减益叠加", "控场", "反制爆发"],
-    accentClassName: "from-violet-400/20 via-fuchsia-400/10 to-transparent",
+    Icon: MoonStar,
   },
   {
     id: "Role3_Reviver",
     name: "复苏者",
     tagline: "逆转战局，守护同伴",
     highlights: ["治疗增益", "续航", "节奏掌控"],
-    accentClassName: "from-emerald-400/18 via-green-400/10 to-transparent",
+    Icon: HeartPulse,
   },
   {
     id: "Role4_Bulwark",
     name: "重装卫士",
     tagline: "坚壁不摧，正面推进",
     highlights: ["高防御", "嘲讽牵制", "阵地战"],
-    accentClassName: "from-amber-400/18 via-orange-400/10 to-transparent",
+    Icon: Shield,
   },
 ]
+
+type ArcadeTile = {
+  href: string
+  category: string
+  title: string
+  blurb: string
+  Icon: React.ComponentType<{ className?: string }>
+  accent: string
+}
+
+const ARCADE: ArcadeTile[] = [
+  {
+    href: "/shoot-them-all",
+    category: "Physics",
+    title: "Shoot Them All",
+    blurb: "物理弹射 · 连锁清场",
+    Icon: Target,
+    accent: "from-rose-400/25 to-orange-400/10",
+  },
+  {
+    href: "/lets-running",
+    category: "Runner",
+    title: "Let's Running",
+    blurb: "Star Dash · 跑酷与滑铲",
+    Icon: Footprints,
+    accent: "from-violet-400/25 to-fuchsia-400/10",
+  },
+  {
+    href: "/merge",
+    category: "Merge",
+    title: "AsterNova Merge",
+    blurb: "合成星球 · 十级进化",
+    Icon: Layers,
+    accent: "from-fuchsia-400/22 to-purple-500/10",
+  },
+  {
+    href: "/nebula-survivor",
+    category: "Survivor",
+    title: "Nebula Survivor",
+    blurb: "俯视角肉鸽 · 三选一构筑",
+    Icon: Orbit,
+    accent: "from-sky-400/22 to-indigo-500/12",
+  },
+]
+
+function GlassPanel({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-40px" }}
+      transition={{ duration: 0.5, ease: easeOut }}
+      className={`rounded-[1.35rem] border border-white/[0.08] bg-white/[0.04] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-2xl ${className}`}
+      style={{ WebkitBackdropFilter: "blur(40px) saturate(180%)" }}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+function SectionRule() {
+  return (
+    <div className="relative my-2 h-px w-full overflow-hidden rounded-full bg-gradient-to-r from-transparent via-white/[0.12] to-transparent" />
+  )
+}
 
 export default function LobbyPage() {
   const router = useRouter()
@@ -62,21 +191,20 @@ export default function LobbyPage() {
   const wsRef = React.useRef<WebSocket | null>(null)
   const matchingTimeoutRef = React.useRef<number | null>(null)
   const [matching, setMatching] = React.useState(false)
-  // ===== 新增代码 START =====
-  // 右侧 Edius 风格列表：用于滚动定位当前选中的职业
   const roleItemRefs = React.useRef<Record<string, HTMLButtonElement | null>>({})
   const selectedRole = React.useMemo(() => ROLES.find((r) => r.id === selectedClass) || ROLES[0], [selectedClass])
-  // ===== 新增代码 END =====
 
-  // ===== 新增代码 START =====
-  // 路由守卫：未登录用户访问大厅时强制跳转到登录页并提示
+  const { avatarId, setAvatarId, pickerOpen, setPickerOpen } = useLobbyAvatar()
+
+  const storeRehydrated = useGameStoreRehydrated()
+
   React.useEffect(() => {
+    if (!storeRehydrated) return
     if (!token || !userId) {
       toast.error("请先登录")
       router.replace("/login")
     }
-  }, [token, userId, router])
-  // ===== 新增代码 END =====
+  }, [storeRehydrated, token, userId, router])
 
   React.useEffect(() => {
     return () => {
@@ -105,9 +233,7 @@ export default function LobbyPage() {
 
     setMatching(true)
 
-    const ws = new WebSocket(
-      `ws://127.0.0.1:8081/ws?token=${encodeURIComponent(token)}&scope=lobby`,
-    )
+    const ws = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token)}&scope=lobby`)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -125,17 +251,14 @@ export default function LobbyPage() {
         const msg = JSON.parse(String(ev.data ?? "")) as { type?: string; room_id?: string }
         if (msg?.type === "match_success" && typeof msg.room_id === "string" && msg.room_id) {
           setCurrentRoomId(msg.room_id)
-          toast.success("匹配成功！正在建立战场链接...")
-
-          // ===== 新增核心代码：颁发进入战场的合法凭证 =====
+          toast.success("匹配成功！正在建立战场链接…")
           useGameStore.getState().setSessionReadyForBattle(true)
-
           matchingTimeoutRef.current = window.setTimeout(() => {
             router.push("/arena")
           }, 1500)
         }
       } catch {
-        // ignore non-json messages
+        /* ignore */
       }
     }
 
@@ -145,12 +268,11 @@ export default function LobbyPage() {
       try {
         ws.close()
       } catch {
-        // ignore
+        /* ignore */
       }
     }
 
     ws.onclose = (ev) => {
-      // eslint-disable-next-line no-console
       console.debug("[LobbyWS] closed", {
         code: ev.code,
         reason: ev.reason,
@@ -161,204 +283,382 @@ export default function LobbyPage() {
     }
   }
 
+  const RoleIcon = selectedRole.Icon
+
   return (
-    <div className="relative min-h-screen overflow-hidden bg-black text-white">
-      <div className="pointer-events-none absolute inset-0 opacity-80">
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:48px_48px] [mask-image:radial-gradient(circle_at_20%_25%,black,transparent_65%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_25%,rgba(56,189,248,0.18),transparent_45%),radial-gradient(circle_at_85%_25%,rgba(168,85,247,0.16),transparent_55%),radial-gradient(circle_at_70%_80%,rgba(34,197,94,0.10),transparent_55%)]" />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/70 to-black" />
+    <div
+      className="relative min-h-[100dvh] overflow-x-hidden bg-[#030303] text-white selection:bg-white/15"
+      style={{ fontFamily: uiFont }}
+    >
+      <div className="pointer-events-none fixed inset-0">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_85%_55%_at_50%_-18%,rgba(120,119,198,0.14),transparent)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_100%_0%,rgba(59,130,246,0.055),transparent_52%)]" />
       </div>
 
-      {/* ===== 新增代码 START ===== */}
-      {/* Edius 风大厅：右侧为职业列表，主屏动态展示选中职业信息与动画占位 */}
-      <div className="relative mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 gap-8 px-6 py-10 md:grid-cols-[1.6fr_0.9fr]">
-        {/* 主屏：角色信息与动画占位 */}
-        <section className="flex flex-col gap-5">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <div className="text-xs tracking-widest text-white/50">ASTER NOVA LOBBY</div>
-              <div className="mt-2 text-3xl font-semibold tracking-tight">
-                Welcome, <span className="text-cyan-200">{username || "Anonymous"}</span>
-              </div>
-              <div className="mt-2 text-sm text-white/55">Reach Beyond the Stars</div>
+      <motion.header
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: easeOut }}
+        className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#030303]/78 backdrop-blur-xl supports-[backdrop-filter]:bg-[#030303]/52"
+      >
+        <div className="mx-auto flex h-[3.25rem] max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+          <motion.div
+            className="flex items-center gap-3"
+            whileHover={{ scale: 1.01 }}
+            transition={{ type: "spring", stiffness: 520, damping: 28 }}
+          >
+            <motion.div
+              className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/[0.08] ring-1 ring-white/[0.1]"
+              whileHover={{ rotate: [0, -6, 6, 0] }}
+              transition={{ duration: 0.5 }}
+            >
+              <Sparkles className="h-[1.15rem] w-[1.15rem] text-white/85" strokeWidth={1.5} />
+            </motion.div>
+            <div className="leading-[1.15]">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/32">AsterNova</p>
+              <p className="mt-0.5 text-[15px] font-semibold tracking-[-0.02em] text-white/96">大厅</p>
             </div>
-            <div className="text-xs text-white/40">右侧滚动选择职业</div>
-          </div>
+          </motion.div>
+          <motion.div
+            className="flex items-center gap-2.5 rounded-full border border-white/[0.1] bg-white/[0.05] py-1.5 pl-1.5 pr-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] sm:pr-4"
+            whileHover={{ borderColor: "rgba(255,255,255,0.16)", backgroundColor: "rgba(255,255,255,0.07)" }}
+            transition={{ type: "spring", stiffness: 420, damping: 26 }}
+          >
+            <motion.button
+              type="button"
+              title="更换头像"
+              aria-label="打开头像选择"
+              onClick={() => setPickerOpen(true)}
+              whileHover={{ scale: 1.06 }}
+              whileTap={{ scale: 0.92 }}
+              className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/[0.12] ring-2 ring-white/25 ring-offset-2 ring-offset-[#030303] transition hover:ring-white/45"
+            >
+              <LobbyPresetAvatar id={avatarId} className="h-8 w-8" />
+            </motion.button>
+            <span className="max-w-[10rem] truncate text-[13px] font-medium tracking-[-0.01em] text-white/88 sm:max-w-[14rem]">
+              {username || "访客"}
+            </span>
+          </motion.div>
+        </div>
+      </motion.header>
 
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-            <Card className="border-white/10 bg-black/55 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_0_80px_rgba(56,189,248,0.08)] backdrop-blur">
-              <CardHeader>
-                <CardTitle className="text-lg">角色详细数据 HUD</CardTitle>
-                <CardDescription className="text-white/65">
-                  根据右侧选中职业，实时切换属性展示与战术要点。
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                  <span className="text-white/60">UserId</span>
-                  <span className="font-mono text-white/85">{userId || "-"}</span>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                  <span className="text-white/60">Selected</span>
-                  <span className="font-mono text-white/85">{selectedRole?.id}</span>
-                </div>
-                <div className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                  <div className="text-xs text-white/55">职业</div>
-                  <div className="mt-1 text-base font-semibold">{selectedRole?.name}</div>
-                  <div className="mt-1 text-sm text-white/65">{selectedRole?.tagline}</div>
-                </div>
-                <ul className="mt-3 space-y-1.5 text-sm text-white/75">
-                  {selectedRole?.highlights.map((h) => (
-                    <li key={h} className="flex items-center gap-2">
-                      <span className="inline-block size-1.5 rounded-full bg-white/30" />
-                      <span>{h}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-
-            {/* 角色动画占位 */}
-            <Card className="relative overflow-hidden border-white/10 bg-black/45 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_0_120px_rgba(168,85,247,0.10)] backdrop-blur">
-              <style>{`
-                @keyframes ediusScan {
-                  0% { transform: translateY(-120%); opacity: 0; }
-                  14% { opacity: .55; }
-                  100% { transform: translateY(120%); opacity: 0; }
-                }
-                @keyframes ediusFlow {
-                  0% { transform: translateX(-30%); opacity: .18; }
-                  40% { opacity: .35; }
-                  100% { transform: translateX(130%); opacity: 0; }
-                }
-              `}</style>
-              <div className={["pointer-events-none absolute inset-0 bg-gradient-to-br", selectedRole?.accentClassName || ""].join(" ")} />
-              <div className="pointer-events-none absolute inset-0 opacity-35 bg-[linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:52px_52px]" />
-              <div
-                className="pointer-events-none absolute inset-x-0 top-0 h-16"
-                style={{
-                  background:
-                    "linear-gradient(180deg, rgba(56,189,248,0) 0%, rgba(56,189,248,0.18) 35%, rgba(168,85,247,0.0) 100%)",
-                  animation: "ediusScan 1.9s ease-in-out infinite",
-                }}
-              />
-              <div
-                className="pointer-events-none absolute left-0 top-1/2 h-2 w-28 -translate-y-1/2 rounded-full blur-sm"
-                style={{
-                  background:
-                    "linear-gradient(90deg, rgba(56,189,248,0), rgba(168,85,247,0.65), rgba(99,102,241,0))",
-                  animation: "ediusFlow 1.15s linear infinite",
-                }}
-              />
-              <CardHeader className="relative">
-                <CardTitle className="text-lg">角色 3D / 多帧插画动画（占位）</CardTitle>
-                <CardDescription className="text-white/65">
-                  后续将接入多帧插画/骨骼动画资源。当前仅保留展示结构。
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="relative">
-                <div className="flex h-[380px] flex-col items-center justify-center gap-3 rounded-xl border border-white/10 bg-black/40 px-4 text-center">
-                  <div className="text-xs tracking-[0.35em] text-white/45">3D / FRAMES</div>
-                  <div>
-                    <div className="mt-2 text-2xl font-semibold">{selectedRole?.name}</div>
-                    <div className="mt-2 text-sm text-white/60">占位容器：等待角色模型 / 多帧插画接入</div>
-                  </div>
-                  <div className="mt-2 h-px w-full max-w-[280px] bg-white/10" />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-
-        {/* 右侧：Edius 风格职业列表 */}
-        <aside className="flex flex-col gap-4">
-          <Card className="border-white/10 bg-black/55 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_0_90px_rgba(56,189,248,0.08)] backdrop-blur">
-            <CardHeader>
-              <CardTitle className="text-lg">职业列表</CardTitle>
-              <CardDescription className="text-white/60">滚动/点击切换职业</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1 scroll-smooth [scrollbar-width:thin] snap-y snap-mandatory">
-                {ROLES.map((role) => {
-                  const active = selectedClass === role.id
-                  return (
-                    <button
-                      key={role.id}
-                      type="button"
-                      ref={(el) => {
-                        roleItemRefs.current[role.id] = el
-                      }}
-                      onClick={() => {
-                        setSelectedClass(role.id)
-                        const el = roleItemRefs.current[role.id]
-                        if (el) {
-                          try {
-                            el.scrollIntoView({ block: "center", behavior: "smooth" })
-                          } catch {
-                            // ignore
-                          }
-                        }
-                      }}
-                      className={[
-                        "group relative w-full rounded-xl border px-3 py-3 text-left transition",
-                        "bg-black/35 hover:bg-black/45",
-                        "snap-center",
-                        active
-                          ? "border-cyan-300/30 shadow-[0_0_0_1px_rgba(34,211,238,0.20),0_0_44px_rgba(168,85,247,0.12)]"
-                          : "border-white/10",
-                      ].join(" ")}
-                    >
-                      <div className={["pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-br opacity-70", role.accentClassName].join(" ")} />
-                      <div className="relative flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold">{role.name}</div>
-                          <div className="mt-1 text-xs text-white/60">{role.tagline}</div>
-                        </div>
-                        <div
-                          className={[
-                            "shrink-0 rounded-full border px-2 py-0.5 text-xs",
-                            active ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100" : "border-white/10 bg-white/5 text-white/55",
-                          ].join(" ")}
-                        >
-                          {active ? "已选中" : "选择"}
-                        </div>
-                      </div>
-                    </button>
-                  )
-                })}
+      <motion.main
+        variants={pageVariants}
+        initial="hidden"
+        animate="show"
+        className="relative z-10 mx-auto max-w-6xl space-y-12 px-4 py-9 pb-40 sm:space-y-14 sm:px-6 sm:py-11 sm:pb-36 md:space-y-[3.25rem] md:pb-32"
+      >
+        <motion.section variants={sectionVariants} className="space-y-6">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div className="flex gap-4">
+              <motion.div
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[0.95rem] bg-white/[0.07] ring-1 ring-white/[0.09]"
+                whileHover={{ scale: 1.05, rotate: -2 }}
+                transition={{ type: "spring", stiffness: 400, damping: 22 }}
+              >
+                <Gamepad2 className="h-[1.35rem] w-[1.35rem] text-white/82" strokeWidth={1.6} />
+              </motion.div>
+              <div className="min-w-0 pt-0.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-white/34">Offline</p>
+                <h2 className="mt-1.5 text-[1.65rem] font-semibold leading-[1.15] tracking-[-0.03em] text-white sm:text-[1.85rem]">
+                  休闲小游戏
+                </h2>
+                <p className="mt-2 max-w-[26rem] text-[14px] leading-[1.55] text-white/44">
+                  无需匹配，本地即玩。与下方联机战场互不干扰。
+                </p>
               </div>
-            </CardContent>
-          </Card>
-        </aside>
-      </div>
-      {/* ===== 新增代码 END ===== */}
+            </div>
+          </div>
 
-      <div className="fixed right-6 bottom-6 z-20">
-        <Button
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+            {ARCADE.map((game, i) => (
+              <motion.button
+                key={game.href}
+                type="button"
+                custom={i}
+                variants={arcadeTileVariants}
+                initial="hidden"
+                animate="show"
+                whileHover={{ y: -5, transition: { type: "spring", stiffness: 420, damping: 22 } }}
+                whileTap={{ scale: 0.97, y: -1 }}
+                onClick={() => router.push(game.href)}
+                className="group relative flex flex-col overflow-hidden rounded-[1.28rem] border border-white/[0.07] bg-white/[0.035] p-[1.05rem] pb-[1.15rem] text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_2px_24px_rgba(0,0,0,0.25)] transition-[border-color,box-shadow] duration-300 hover:border-white/[0.14] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_12px_40px_rgba(0,0,0,0.35)]"
+                style={{ WebkitBackdropFilter: "blur(26px)" }}
+              >
+                <div
+                  className={`pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-gradient-to-br opacity-[0.55] blur-3xl transition-opacity duration-500 group-hover:opacity-[0.75] ${game.accent}`}
+                />
+                <div className="relative flex items-start justify-between gap-3">
+                  <motion.div
+                    className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/[0.1] ring-1 ring-white/[0.08]"
+                    whileHover={{ scale: 1.08 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 20 }}
+                  >
+                    <game.Icon
+                      className="h-[1.2rem] w-[1.2rem] text-white/92 transition-transform duration-300 group-hover:scale-105"
+                      strokeWidth={1.7}
+                    />
+                  </motion.div>
+                  <span className="rounded-full border border-white/[0.08] bg-black/25 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-white/38">
+                    {game.category}
+                  </span>
+                </div>
+                <p className="relative mt-4 text-[15px] font-semibold leading-snug tracking-[-0.02em] text-white">{game.title}</p>
+                <p className="relative mt-1.5 text-[13px] leading-[1.45] text-white/46">{game.blurb}</p>
+                <div className="relative mt-auto pt-5">
+                  <span className="lobby-arcade-enter-pill relative inline-flex items-center gap-1.5 rounded-full border border-white/40 bg-white/[0.2] px-4 py-2.5 text-[13px] font-semibold text-white tabular-nums">
+                    <span
+                      className="pointer-events-none absolute inset-0 overflow-hidden rounded-full"
+                      aria-hidden
+                    >
+                      <span className="lobby-arcade-sheen pointer-events-none absolute left-0 top-0 h-full w-[55%] bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+                    </span>
+                    <span className="relative drop-shadow-[0_0_8px_rgba(255,255,255,0.35)]">进入</span>
+                    <ChevronRight
+                      className="relative h-4 w-4 text-white transition-transform duration-300 group-hover:translate-x-1"
+                      strokeWidth={2.5}
+                    />
+                  </span>
+                </div>
+              </motion.button>
+            ))}
+          </div>
+        </motion.section>
+
+        <motion.div variants={sectionVariants}>
+          <SectionRule />
+        </motion.div>
+
+        <motion.section variants={sectionVariants} className="space-y-6">
+          <div className="flex gap-4">
+            <motion.div
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[0.95rem] bg-white/[0.07] ring-1 ring-white/[0.09]"
+              whileHover={{ scale: 1.05, rotate: 2 }}
+              transition={{ type: "spring", stiffness: 400, damping: 22 }}
+            >
+              <Swords className="h-[1.35rem] w-[1.35rem] text-white/76" strokeWidth={1.6} />
+            </motion.div>
+            <div className="min-w-0 pt-0.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-white/34">Online</p>
+              <h2 className="mt-1.5 text-[1.65rem] font-semibold leading-[1.15] tracking-[-0.03em] text-white sm:text-[1.85rem]">
+                联机战场
+              </h2>
+              <p className="mt-2 max-w-[26rem] text-[14px] leading-[1.55] text-white/44">
+                选择职业后匹配进入竞技场。右侧列表可滚动切换。
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.12fr_0.88fr] lg:gap-7">
+            <GlassPanel className="overflow-hidden p-5 sm:p-7">
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/[0.06] pb-6">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={selectedRole.id}
+                    initial={{ opacity: 0, x: -12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 10 }}
+                    transition={{ duration: 0.3, ease: easeOut }}
+                    className="flex items-center gap-4"
+                  >
+                    <motion.div
+                      layout
+                      className="flex h-[3.6rem] w-[3.6rem] items-center justify-center rounded-[1.05rem] bg-gradient-to-br from-white/[0.14] to-white/[0.04] ring-1 ring-white/[0.1]"
+                    >
+                      <RoleIcon className="h-7 w-7 text-white/88" strokeWidth={1.45} />
+                    </motion.div>
+                    <div>
+                      <p className="text-[12px] font-medium text-white/38">当前职业</p>
+                      <p className="mt-1 text-[1.35rem] font-semibold leading-tight tracking-[-0.03em]">{selectedRole.name}</p>
+                      <p className="mt-1.5 text-[14px] leading-snug text-white/48">{selectedRole.tagline}</p>
+                    </div>
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+
+              <div className="mt-6 space-y-2.5">
+                <motion.div
+                  whileHover={{ borderColor: "rgba(255,255,255,0.1)", backgroundColor: "rgba(0,0,0,0.32)" }}
+                  className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/[0.22] px-3.5 py-3 transition-colors duration-200"
+                >
+                  <IdCard className="h-4 w-4 shrink-0 text-white/32" strokeWidth={1.75} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/32">User ID</p>
+                    <p className="mt-0.5 truncate font-mono text-[12px] text-white/74">{userId || "—"}</p>
+                  </div>
+                </motion.div>
+                <motion.div
+                  whileHover={{ borderColor: "rgba(255,255,255,0.1)", backgroundColor: "rgba(0,0,0,0.32)" }}
+                  className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/[0.22] px-3.5 py-3 transition-colors duration-200"
+                >
+                  <Cpu className="h-4 w-4 shrink-0 text-white/32" strokeWidth={1.75} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/32">Role key</p>
+                    <p className="mt-0.5 truncate font-mono text-[11px] text-white/62">{selectedRole.id}</p>
+                  </div>
+                </motion.div>
+              </div>
+
+              <ul className="mt-6 space-y-2">
+                {selectedRole.highlights.map((h, i) => (
+                  <motion.li
+                    key={`${selectedRole.id}-${h}`}
+                    custom={i}
+                    variants={highlightVariants}
+                    initial="hidden"
+                    animate="show"
+                    className="flex items-center gap-3 text-[14px] leading-snug text-white/70"
+                  >
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/[0.07] ring-1 ring-white/[0.06]">
+                      <span className="h-1 w-1 rounded-full bg-white/55" />
+                    </span>
+                    {h}
+                  </motion.li>
+                ))}
+              </ul>
+
+              <motion.div
+                className="mt-8 overflow-hidden rounded-2xl border border-dashed border-white/[0.1] bg-black/[0.28]"
+                initial={false}
+                animate={{ borderColor: "rgba(255,255,255,0.1)" }}
+              >
+                <div className="flex aspect-[16/10] max-h-[280px] flex-col items-center justify-center gap-2 px-6 py-10 sm:max-h-[300px]">
+                  <motion.div
+                    animate={{ y: [0, -4, 0] }}
+                    transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                    className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-3.5"
+                  >
+                    <RoleIcon className="h-8 w-8 text-white/28" strokeWidth={1.2} />
+                  </motion.div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-white/28">Preview</p>
+                  <p className="max-w-[16rem] text-center text-[13px] leading-relaxed text-white/38">
+                    角色展示位 · 待接入模型 / 立绘
+                  </p>
+                </div>
+              </motion.div>
+            </GlassPanel>
+
+            <GlassPanel className="flex flex-col overflow-hidden">
+              <div className="border-b border-white/[0.06] px-5 py-4 sm:px-7 sm:py-5">
+                <p className="text-[15px] font-semibold tracking-[-0.02em]">职业</p>
+                <p className="mt-1 text-[13px] text-white/40">轻点切换 · 弹簧反馈</p>
+              </div>
+              <LayoutGroup id="roles">
+                <div className="max-h-[min(58vh,520px)] space-y-1 overflow-y-auto p-2.5 sm:p-3.5 [scrollbar-width:thin]">
+                  {ROLES.map((role) => {
+                    const active = selectedClass === role.id
+                    const RIcon = role.Icon
+                    return (
+                      <motion.button
+                        key={role.id}
+                        type="button"
+                        layout
+                        ref={(el) => {
+                          roleItemRefs.current[role.id] = el
+                        }}
+                        onClick={() => {
+                          setSelectedClass(role.id)
+                          const el = roleItemRefs.current[role.id]
+                          if (el) {
+                            try {
+                              el.scrollIntoView({ block: "center", behavior: "smooth" })
+                            } catch {
+                              /* ignore */
+                            }
+                          }
+                        }}
+                        whileHover={{ backgroundColor: "rgba(255,255,255,0.06)" }}
+                        whileTap={{ scale: 0.985 }}
+                        transition={{ type: "spring", stiffness: 520, damping: 32 }}
+                        className="relative flex w-full items-center gap-3 overflow-hidden rounded-xl px-3 py-3 text-left"
+                      >
+                        {active ? (
+                          <motion.div
+                            layoutId="roleActiveBg"
+                            className="absolute inset-0 rounded-xl bg-white/[0.1] ring-1 ring-white/[0.14]"
+                            transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                          />
+                        ) : null}
+                        <motion.div
+                          layout
+                          className={[
+                            "relative z-[1] flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ring-1",
+                            active ? "bg-white/[0.16] ring-white/22" : "bg-white/[0.06] ring-white/[0.06]",
+                          ].join(" ")}
+                          animate={active ? { scale: [1, 1.06, 1] } : { scale: 1 }}
+                          transition={{ duration: 0.35 }}
+                        >
+                          <RIcon className="h-[1.15rem] w-[1.15rem] text-white/88" strokeWidth={1.75} />
+                        </motion.div>
+                        <div className="relative z-[1] min-w-0 flex-1">
+                          <p className="text-[15px] font-medium leading-tight tracking-[-0.02em]">{role.name}</p>
+                          <p className="mt-0.5 truncate text-[12px] text-white/42">{role.tagline}</p>
+                        </div>
+                        <span className="relative z-[1] shrink-0">
+                          {active ? (
+                            <span className="inline-block rounded-full bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-black">
+                              已选
+                            </span>
+                          ) : (
+                            <ChevronRight className="h-4 w-4 text-white/22" strokeWidth={2} />
+                          )}
+                        </span>
+                      </motion.button>
+                    )
+                  })}
+                </div>
+              </LayoutGroup>
+            </GlassPanel>
+          </div>
+        </motion.section>
+      </motion.main>
+
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center bg-gradient-to-t from-[#030303] via-[#030303]/92 to-transparent pb-[max(1.1rem,env(safe-area-inset-bottom))] pt-16">
+        <motion.button
           type="button"
-          size="lg"
           disabled={matching}
           onClick={connectAndMatch}
-          className={[
-            "relative h-14 px-8 text-base font-semibold text-black",
-            "bg-cyan-300 hover:bg-cyan-200",
-            "shadow-[0_0_0_1px_rgba(34,211,238,0.25),0_12px_40px_rgba(34,211,238,0.18)]",
-            "before:absolute before:inset-0 before:rounded-lg before:bg-[conic-gradient(from_180deg_at_50%_50%,rgba(34,211,238,0.0),rgba(34,211,238,0.35),rgba(168,85,247,0.25),rgba(34,211,238,0.0))] before:opacity-60 before:blur-xl before:content-['']",
-            matching ? "cursor-not-allowed" : "animate-[pulse_2.4s_ease-in-out_infinite]",
-          ].join(" ")}
+          whileHover={
+            matching
+              ? undefined
+              : {
+                  scale: 1.03,
+                  boxShadow: "0 16px 48px rgba(255,255,255,0.14), 0 0 0 1px rgba(255,255,255,0.2) inset",
+                }
+          }
+          whileTap={matching ? undefined : { scale: 0.96 }}
+          transition={{ type: "spring", stiffness: 460, damping: 26 }}
+          className="pointer-events-auto group relative flex min-h-[54px] w-full max-w-[min(100%-2rem,28rem)] items-center justify-center gap-2.5 overflow-hidden rounded-full bg-white px-8 text-[15px] font-semibold tracking-[-0.02em] text-black shadow-[0_10px_40px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.14)_inset] transition-shadow disabled:cursor-not-allowed disabled:opacity-[0.52]"
         >
-          <span className="relative flex items-center gap-2">
-            {matching ? (
-              <>
-                <span className="inline-block size-4 animate-spin rounded-full border-2 border-black/25 border-t-black" />
-                <span>寻找对手中...</span>
-              </>
-            ) : (
-              <span>匹配对战</span>
-            )}
-          </span>
-        </Button>
+          {!matching ? (
+            <span
+              className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+              style={{
+                background:
+                  "linear-gradient(105deg, transparent 38%, rgba(255,255,255,0.5) 50%, transparent 62%)",
+              }}
+            />
+          ) : null}
+          {matching ? (
+            <span className="relative flex items-center gap-2.5">
+              <Loader2 className="h-5 w-5 animate-spin text-black/78" strokeWidth={2} />
+              <span>匹配中…</span>
+            </span>
+          ) : (
+            <span className="relative flex items-center gap-2.5">
+              <Swords className="h-[1.12rem] w-[1.12rem] text-black/88" strokeWidth={2} />
+              <span>开始匹配</span>
+            </span>
+          )}
+        </motion.button>
       </div>
+
+      <LobbyAvatarPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        currentId={avatarId}
+        onSelect={setAvatarId}
+      />
     </div>
   )
 }

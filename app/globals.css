@@ -140,3 +140,70 @@ body {
     @apply font-sans;
   }
 }
+
+/* AsterNova 小游戏：竖屏时旋转壳内铺满逻辑横屏区域 */
+.mobile-game-landscape-fill {
+  height: 100%;
+  width: 100%;
+  min-height: 100%;
+  overflow: hidden;
+}
+
+.mobile-game-landscape-fill > * {
+  box-sizing: border-box;
+  height: 100% !important;
+  min-height: 100% !important;
+  width: 100% !important;
+}
+
+/* 大厅 · 小游戏卡片「进入」微光呼吸 */
+@keyframes lobby-arcade-enter-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 18px rgba(255, 255, 255, 0.14),
+      0 0 36px rgba(255, 255, 255, 0.06),
+      inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  }
+  50% {
+    box-shadow:
+      0 0 28px rgba(255, 255, 255, 0.28),
+      0 0 48px rgba(255, 255, 255, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  }
+}
+
+.lobby-arcade-enter-pill {
+  animation: lobby-arcade-enter-glow 2.6s ease-in-out infinite;
+}
+
+.group:hover .lobby-arcade-enter-pill {
+  animation: none;
+  box-shadow:
+    0 0 32px rgba(255, 255, 255, 0.38),
+    0 0 56px rgba(255, 255, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+@keyframes lobby-enter-sheen {
+  0% {
+    transform: translateX(-120%) skewX(-18deg);
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(320%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
+.lobby-arcade-sheen {
+  transform: translateX(-120%) skewX(-18deg);
+  opacity: 0;
+}
+
+.group:hover .lobby-arcade-enter-pill .lobby-arcade-sheen {
+  animation: lobby-enter-sheen 0.88s ease-out forwards;
+}
