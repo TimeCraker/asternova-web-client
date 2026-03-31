@@ -8,6 +8,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
+import { LoopingBgmControl } from "@/src/components/audio/LoopingBgmControl"
 
 // —— 可调参数 ——
 const GRAVITY = 2600
@@ -333,8 +334,10 @@ export function StarDashGame() {
     }
     try {
       if (typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches) {
-        const o = screen.orientation as ScreenOrientation & { lock?: (l: string) => Promise<void> }
-        void o?.lock?.("landscape").catch(() => {})
+        const o = (window.screen?.orientation ?? null) as (ScreenOrientation & { lock?: (l: string) => Promise<void> }) | null
+        if (o?.lock) {
+          void o.lock("landscape").catch(() => {})
+        }
       }
     } catch {
       /* ignore */
@@ -355,8 +358,10 @@ export function StarDashGame() {
     const canvas = canvasRef.current
     if (!wrap || !canvas) return
 
-    const w = Math.max(320, wrap.clientWidth || 800)
-    const h = Math.max(400, Math.min(640, window.innerHeight * 0.72))
+    const rect = wrap.getBoundingClientRect()
+    const w = Math.max(320, Math.floor(rect.width || wrap.clientWidth || 800))
+    // IMPORTANT: use wrap height (not window.innerHeight) so portrait-rotate shell is correctly accounted
+    const h = Math.max(400, Math.min(640, Math.floor(rect.height || 600)))
     const dpr = Math.min(2, window.devicePixelRatio || 1)
 
     const groundY = h - GROUND_MARGIN
@@ -925,7 +930,7 @@ export function StarDashGame() {
   }
 
   return (
-    <div className="relative flex min-h-[100dvh] min-h-screen flex-col bg-[#050508] text-white">
+    <div className="relative flex h-full min-h-0 min-h-full flex-col bg-[#050508] text-white">
       <div className="relative z-20 flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.08] px-4 py-3 backdrop-blur-xl">
         <button
           type="button"
@@ -1020,10 +1025,10 @@ export function StarDashGame() {
         </div>
       ) : null}
 
-      <div className="relative flex flex-1 flex-col items-center justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 min-[480px]:px-4">
+      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 min-[480px]:px-4">
         <div
           ref={wrapRef}
-          className="relative mx-auto aspect-video w-full max-w-[min(100%,960px)] max-h-[min(76dvh,720px)] min-h-[200px] overflow-hidden rounded-[1.75rem] border border-white/[0.1] shadow-[0_0_60px_rgba(168,85,247,0.12)] max-[520px]:max-h-[min(52vw,82dvh)]"
+          className="relative mx-auto aspect-video h-full w-full max-w-[min(100%,960px)] max-h-[720px] min-h-[200px] overflow-hidden rounded-[1.75rem] border border-white/[0.1] shadow-[0_0_60px_rgba(168,85,247,0.12)]"
         >
           <canvas
             ref={canvasRef}
@@ -1097,6 +1102,7 @@ export function StarDashGame() {
           </div>
         ) : null}
       </div>
+      <LoopingBgmControl src="/audio/games/lets-running/Digital_Frenzy lets running.mp3" storageKey="bgm-volume:lets-running" />
     </div>
   )
 }

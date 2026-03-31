@@ -1,5 +1,5 @@
 import type { Viewport } from "next"
-import { MergeGame } from "@/src/components/merge/MergeGame"
+import { MergePageClient } from "@/src/components/game-pages/MergePageClient"
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -8,5 +8,5 @@ export const viewport: Viewport = {
 }
 
 export default function MergePage() {
-  return <MergeGame />
+  return <MergePageClient />
 }

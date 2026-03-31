@@ -4,6 +4,7 @@ import { motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 
 import { CinematicBlackHole } from "@/src/components/CinematicBlackHole"
+import { LoopingBgmControl } from "@/src/components/audio/LoopingBgmControl"
 
 const cinematicEase = [0.22, 1, 0.36, 1] as const
 
@@ -124,6 +125,7 @@ export default function Home() {
           </motion.button>
         </motion.div>
       </motion.div>
+      <LoopingBgmControl src="/audio/home/Deep_space_ambient_d_#4-1774866771004.wav" storageKey="bgm-volume:home" />
     </div>
   )
 }

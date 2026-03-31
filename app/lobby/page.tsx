@@ -23,6 +23,7 @@ import {
 import { toast } from "sonner"
 
 import { LobbyAvatarPickerModal, LobbyPresetAvatar, useLobbyAvatar } from "@/src/components/lobby/LobbyAvatars"
+import { LoopingBgmControl } from "@/src/components/audio/LoopingBgmControl"
 import { wsUrl } from "@/src/config/public-env"
 import { useGameStore } from "@/src/store/useGameStore"
 import { useGameStoreRehydrated } from "@/src/store/useGameStoreHydration"
@@ -302,23 +303,29 @@ export default function LobbyPage() {
         className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#030303]/78 backdrop-blur-xl supports-[backdrop-filter]:bg-[#030303]/52"
       >
         <div className="mx-auto flex h-[3.25rem] max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
-          <motion.div
-            className="flex items-center gap-3"
+          <motion.button
+            type="button"
+            onClick={() => router.push("/")}
+            className="group relative flex items-center gap-3 rounded-2xl px-1.5 py-1 text-left transition"
             whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.98 }}
             transition={{ type: "spring", stiffness: 520, damping: 28 }}
+            aria-label="返回主页面"
+            title="返回主页面"
           >
             <motion.div
-              className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/[0.08] ring-1 ring-white/[0.1]"
+              className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-2xl border border-white/20 bg-white/[0.14] ring-1 ring-white/[0.28] shadow-[0_0_20px_rgba(255,255,255,0.16),inset_0_1px_0_rgba(255,255,255,0.45)]"
               whileHover={{ rotate: [0, -6, 6, 0] }}
               transition={{ duration: 0.5 }}
             >
-              <Sparkles className="h-[1.15rem] w-[1.15rem] text-white/85" strokeWidth={1.5} />
+              <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_18%,rgba(255,255,255,0.48),transparent_60%)]" />
+              <Sparkles className="relative z-[1] h-[1.15rem] w-[1.15rem] text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.48)]" strokeWidth={1.7} />
             </motion.div>
             <div className="leading-[1.15]">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/32">AsterNova</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/40 transition-colors group-hover:text-white/65">AsterNova</p>
               <p className="mt-0.5 text-[15px] font-semibold tracking-[-0.02em] text-white/96">大厅</p>
             </div>
-          </motion.div>
+          </motion.button>
           <motion.div
             className="flex items-center gap-2.5 rounded-full border border-white/[0.1] bg-white/[0.05] py-1.5 pl-1.5 pr-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] sm:pr-4"
             whileHover={{ borderColor: "rgba(255,255,255,0.16)", backgroundColor: "rgba(255,255,255,0.07)" }}
@@ -659,6 +666,7 @@ export default function LobbyPage() {
         currentId={avatarId}
         onSelect={setAvatarId}
       />
+      <LoopingBgmControl src="/audio/lobby/my_track  startgame.mp3" storageKey="bgm-volume:lobby" />
     </div>
   )
 }

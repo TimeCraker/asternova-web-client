@@ -1,5 +1,5 @@
 import type { Viewport } from "next"
-import { GameEngine } from "@/src/components/nova-ball/GameEngine"
+import { ShootThemAllPageClient } from "@/src/components/game-pages/ShootThemAllPageClient"
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -8,6 +8,6 @@ export const viewport: Viewport = {
 }
 
 export default function ShootThemAllPage() {
-  return <GameEngine />
+  return <ShootThemAllPageClient />
 }
 

@@ -58,6 +58,13 @@ export async function login(
   return res.data as { message: string; token: string; user?: { id: number; username: string; email: string } }
 }
 
+export async function guestLogin(
+  inviteCode: string,
+): Promise<{ message: string; token: string; user?: { id: number; username: string; email: string; is_guest?: boolean } }> {
+  const res = await authApi.post("/guest_login", { inviteCode })
+  return res.data as { message: string; token: string; user?: { id: number; username: string; email: string; is_guest?: boolean } }
+}
+
 export async function loginWithEmail(
   email: string,
   code: string,
@@ -69,5 +76,20 @@ export async function loginWithEmail(
   return res.data as
     | { message: string; token: string; user?: { id: number; username: string; email: string } }
     | { action: "require_setup"; message: string }
+}
+
+export async function resetPasswordWithEmail(
+  email: string,
+  code: string,
+  newPassword: string,
+  confirmPassword: string,
+): Promise<{ message: string; identifier: string }> {
+  const res = await authApi.post("/reset_password", {
+    email,
+    code,
+    newPassword,
+    confirmPassword,
+  })
+  return res.data as { message: string; identifier: string }
 }
 

@@ -1,5 +1,5 @@
 import type { Viewport } from "next"
-import { NebulaSurvivorGame } from "@/src/components/nebula-survivor/NebulaSurvivorGame"
+import { NebulaSurvivorPageClient } from "@/src/components/game-pages/NebulaSurvivorPageClient"
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -8,5 +8,5 @@ export const viewport: Viewport = {
 }
 
 export default function NebulaSurvivorPage() {
-  return <NebulaSurvivorGame />
+  return <NebulaSurvivorPageClient />
 }

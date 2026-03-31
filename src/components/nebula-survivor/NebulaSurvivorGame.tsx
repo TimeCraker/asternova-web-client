@@ -8,6 +8,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { AnimatePresence, motion } from "framer-motion"
 import { NebulaEngine, type UpgradeOffer } from "./nebulaEngine"
+import { LoopingBgmControl } from "@/src/components/audio/LoopingBgmControl"
 
 const NEBULA_STORAGE_SKIP_RULES = "nebula-survivor-skip-rules"
 
@@ -440,7 +441,7 @@ export function NebulaSurvivorGame() {
 
   return (
     <div
-      className="relative flex min-h-[100dvh] flex-col overflow-hidden bg-[#05040a] text-white"
+      className="relative flex h-full min-h-0 min-h-full flex-col overflow-hidden bg-[#05040a] text-white"
       style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif' }}
     >
       <div className="relative z-10 flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.07] px-3 py-2.5 backdrop-blur-xl sm:px-5 sm:py-3">
@@ -532,7 +533,7 @@ export function NebulaSurvivorGame() {
 
         <canvas
           ref={canvasRef}
-          className={`block h-[min(100dvh-7rem,calc(100dvh-5.5rem))] w-full min-h-[320px] touch-none sm:h-[calc(100dvh-5.5rem)] ${blocked ? "pointer-events-none" : ""}`}
+          className={`block h-full w-full min-h-[240px] touch-none ${blocked ? "pointer-events-none" : ""}`}
           onPointerMove={onCanvasMove}
           onPointerEnter={() => {
             const g = engineRef.current
@@ -746,6 +747,7 @@ export function NebulaSurvivorGame() {
           </motion.div>
         ) : null}
       </AnimatePresence>
+      <LoopingBgmControl src="/audio/games/nebula-survivor/Untitled.mp3" storageKey="bgm-volume:nebula-survivor" />
     </div>
   )
 }

@@ -8,6 +8,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Bodies, Body, Composite, Engine, Events, Render, Runner, World } from "matter-js"
 import { AnimatePresence, motion } from "framer-motion"
+import { LoopingBgmControl } from "@/src/components/audio/LoopingBgmControl"
 
 const MERGE_STORAGE_SKIP_RULES = "merge-skip-rules"
 
@@ -531,7 +532,7 @@ export function MergeGame() {
     () =>
       ({
         aspectRatio: `${WORLD_W} / ${WORLD_H}`,
-        width: `min(100%, ${STAGE_MAX_CSS_W}px, max(9rem, calc((100svh - 11rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) * ${WORLD_W} / ${WORLD_H})))`,
+        width: `min(100%, ${STAGE_MAX_CSS_W}px, calc((100dvh - 15.5rem) * ${WORLD_W} / ${WORLD_H}))`,
         maxWidth: "100%",
       }) satisfies React.CSSProperties,
     [],
@@ -540,7 +541,7 @@ export function MergeGame() {
   return (
     <div
       ref={shellRef}
-      className="relative flex min-h-0 min-h-[100dvh] flex-col overflow-hidden text-white"
+      className="relative flex h-full min-h-0 min-h-full flex-col overflow-hidden text-white"
       style={{
         backgroundColor: "#121212",
         fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif',
@@ -575,7 +576,7 @@ export function MergeGame() {
         规则
       </button>
 
-      <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-[min(100%,42rem)] flex-1 flex-col gap-3 overflow-y-auto overscroll-y-contain px-[max(0.75rem,env(safe-area-inset-left))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.35rem,env(safe-area-inset-top))] min-[400px]:gap-4 min-[400px]:px-4 min-[400px]:pb-8 min-[400px]:pt-5 sm:gap-5 sm:pb-10 sm:pt-6">
+      <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-[min(100%,42rem)] flex-1 flex-col gap-3 overflow-y-auto overscroll-y-contain px-[max(0.75rem,env(safe-area-inset-left))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.35rem,env(safe-area-inset-top))] min-[400px]:gap-4 min-[400px]:px-4 min-[400px]:pb-6 min-[400px]:pt-4 sm:gap-4 sm:pb-6 sm:pt-4 lg:overflow-hidden">
         <motion.header
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
@@ -844,6 +845,7 @@ export function MergeGame() {
           </motion.div>
         ) : null}
       </AnimatePresence>
+      <LoopingBgmControl src="/audio/games/merge/Velvet_Resonance.mp3" storageKey="bgm-volume:merge" />
     </div>
   )
 }

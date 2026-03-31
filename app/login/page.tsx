@@ -4,7 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { motion } from "framer-motion"
+import { AnimatePresence, motion } from "framer-motion"
 import { ArrowRight, KeyRound, Mail, Sparkles } from "lucide-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 
-import { getApiErrorMessage, login, loginWithEmail, register, sendCode } from "@/src/api/auth"
+import { getApiErrorMessage, guestLogin, login, loginWithEmail, register, resetPasswordWithEmail, sendCode } from "@/src/api/auth"
 import { extractUserIdFromToken } from "@/src/api/jwt"
 import { useGameStore } from "@/src/store/useGameStore"
 import { BluePurpleBlackhole } from "@/src/components/bluePurpleBlackhole"
@@ -47,6 +47,15 @@ export default function LoginPage() {
   const [setupPassword, setSetupPassword] = React.useState("")
   const [codeSending, setCodeSending] = React.useState(false)
   const [emailSubmitting, setEmailSubmitting] = React.useState(false)
+  const [resetOpen, setResetOpen] = React.useState(false)
+  const [resetEmail, setResetEmail] = React.useState("")
+  const [resetCode, setResetCode] = React.useState("")
+  const [resetPassword, setResetPassword] = React.useState("")
+  const [resetPasswordConfirm, setResetPasswordConfirm] = React.useState("")
+  const [resetCodeSending, setResetCodeSending] = React.useState(false)
+  const [resetSubmitting, setResetSubmitting] = React.useState(false)
+  const [guestInviteCode, setGuestInviteCode] = React.useState("")
+  const [guestSubmitting, setGuestSubmitting] = React.useState(false)
 
   function goToEmailRegister() {
     setActiveTab("email_login")
@@ -162,6 +171,78 @@ export default function LoginPage() {
       toast.error(getApiErrorMessage(err))
     } finally {
       setEmailSubmitting(false)
+    }
+  }
+
+  async function onSendResetCode() {
+    if (!resetEmail) {
+      toast.error("请先填写邮箱")
+      return
+    }
+    setResetCodeSending(true)
+    try {
+      const res = await sendCode(resetEmail)
+      toast.success(res.message || "验证码已发送")
+    } catch (err) {
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setResetCodeSending(false)
+    }
+  }
+
+  async function onSubmitResetPassword(e: React.FormEvent) {
+    e.preventDefault()
+    if (!resetEmail || !resetCode || !resetPassword || !resetPasswordConfirm) {
+      toast.error("请完整填写重置信息")
+      return
+    }
+    const pwdErr = validateSetupPassword(resetPassword)
+    if (pwdErr) {
+      toast.error(pwdErr)
+      return
+    }
+    if (resetPassword !== resetPasswordConfirm) {
+      toast.error("两次密码输入不一致")
+      return
+    }
+
+    setResetSubmitting(true)
+    try {
+      const res = await resetPasswordWithEmail(resetEmail, resetCode, resetPassword, resetPasswordConfirm)
+      setIdentifier(res.identifier || resetEmail)
+      setPassword("")
+      setActiveTab("password_login")
+      setResetOpen(false)
+      setResetCode("")
+      setResetPassword("")
+      setResetPasswordConfirm("")
+      toast.success(res.message || "密码重置成功，请重新登录")
+    } catch (err) {
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setResetSubmitting(false)
+    }
+  }
+
+  async function onSubmitGuestLogin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!guestInviteCode.trim()) {
+      toast.error("请输入邀请码")
+      return
+    }
+    setGuestSubmitting(true)
+    try {
+      const res = await guestLogin(guestInviteCode.trim())
+      const userId = extractUserIdFromToken(res.token)
+      setToken(res.token)
+      setUserId(userId)
+      setUsername(res.user?.username || "Guest")
+      toast.success(res.message || "游客登录成功")
+      router.push("/lobby")
+    } catch (err) {
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setGuestSubmitting(false)
     }
   }
 
@@ -300,6 +381,35 @@ export default function LoginPage() {
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, delay: 1.18, ease: cinematicEase }}
+              className="mt-3 rounded-2xl border border-white/[0.08] bg-gradient-to-br from-white/[0.045] to-white/[0.01] p-[1px] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+            >
+              <form
+                onSubmit={onSubmitGuestLogin}
+                className="flex items-center gap-2 rounded-[0.95rem] bg-black/30 px-3 py-2.5"
+              >
+                <span className="rounded-lg border border-white/10 bg-white/[0.06] px-2 py-1 text-[10px] font-semibold tracking-[0.08em] text-white/65">
+                  游客
+                </span>
+                <Input
+                  value={guestInviteCode}
+                  onChange={(e) => setGuestInviteCode(e.target.value)}
+                  className="h-9 border-white/[0.08] bg-black/35 text-[13px] text-white/90 placeholder:text-white/32 focus-visible:border-white/20 focus-visible:ring-1 focus-visible:ring-violet-400/20"
+                  placeholder="输入邀请码"
+                />
+                <Button
+                  type="submit"
+                  disabled={guestSubmitting}
+                  className="h-9 shrink-0 rounded-lg border border-white/14 bg-white/[0.1] px-3 text-[12px] font-semibold text-white hover:bg-white/[0.14]"
+                >
+                  {guestSubmitting ? "进入中…" : "游客进入"}
+                </Button>
+              </form>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7, delay: 1.24, ease: cinematicEase }}
               className="mt-7"
             >
@@ -341,6 +451,19 @@ export default function LoginPage() {
                         className={fieldClass}
                         placeholder="输入用户名或邮箱"
                       />
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetEmail(identifier.includes("@") ? identifier : "")
+                          setResetOpen(true)
+                        }}
+                        className="text-[12px] font-medium text-cyan-200/85 transition hover:text-cyan-100"
+                      >
+                        忘记密码？
+                      </button>
                     </div>
 
                     <div className="space-y-2">
@@ -465,6 +588,123 @@ export default function LoginPage() {
           </div>
         </motion.div>
       </motion.div>
+
+      <AnimatePresence>
+        {resetOpen ? (
+          <motion.div
+            className="fixed inset-0 z-[120] flex items-end justify-center bg-black/60 p-3 backdrop-blur-md sm:items-center sm:p-5"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setResetOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 18, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.98 }}
+              transition={{ type: "spring", stiffness: 360, damping: 28 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-[430px] rounded-[1.5rem] border border-white/[0.12] bg-[#070708]/[0.9] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.62)] backdrop-blur-2xl sm:p-6"
+            >
+              <h3 className="text-[1.15rem] font-semibold tracking-tight text-white">忘记密码</h3>
+              <p className="mt-1 text-[12px] text-white/52">邮箱验证通过后即可重置密码</p>
+
+              <form className="mt-5 space-y-4" onSubmit={onSubmitResetPassword}>
+                <div className="space-y-2">
+                  <Label htmlFor="reset-email" className={labelClass}>
+                    邮箱
+                  </Label>
+                  <Input
+                    id="reset-email"
+                    type="email"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    autoComplete="email"
+                    className={fieldClass}
+                    placeholder="输入注册邮箱"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-3">
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="reset-code" className={labelClass}>
+                      验证码
+                    </Label>
+                    <Input
+                      id="reset-code"
+                      value={resetCode}
+                      onChange={(e) => setResetCode(e.target.value)}
+                      inputMode="numeric"
+                      className={fieldClass}
+                      placeholder="6 位验证码"
+                    />
+                  </div>
+                  <div className="flex items-end sm:col-span-1">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="h-11 w-full rounded-xl border border-white/14 bg-white/[0.08] text-[13px] font-medium text-white/90 hover:bg-white/[0.13]"
+                      onClick={onSendResetCode}
+                      disabled={resetCodeSending}
+                    >
+                      {resetCodeSending ? "发送中…" : "发送验证码"}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="reset-password" className={labelClass}>
+                    新密码
+                  </Label>
+                  <Input
+                    id="reset-password"
+                    type="password"
+                    value={resetPassword}
+                    onChange={(e) => setResetPassword(e.target.value)}
+                    autoComplete="new-password"
+                    className={fieldClass}
+                    placeholder="输入新密码"
+                  />
+                  <p className="text-[11px] text-white/45">密码需 6-20 位，且包含字母和数字。</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="reset-password-confirm" className={labelClass}>
+                    确认新密码
+                  </Label>
+                  <Input
+                    id="reset-password-confirm"
+                    type="password"
+                    value={resetPasswordConfirm}
+                    onChange={(e) => setResetPasswordConfirm(e.target.value)}
+                    autoComplete="new-password"
+                    className={fieldClass}
+                    placeholder="再次输入新密码"
+                  />
+                </div>
+
+                <div className="mt-2 flex gap-2.5">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setResetOpen(false)}
+                    className="h-11 flex-1 rounded-xl border border-white/14 bg-white/[0.08] text-white/85 hover:bg-white/[0.13]"
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={resetSubmitting}
+                    className="h-11 flex-1 rounded-xl bg-gradient-to-r from-cyan-300/95 via-sky-300/95 to-cyan-200/90 text-[14px] font-semibold text-black shadow-[0_0_28px_rgba(34,211,238,0.2)]"
+                  >
+                    {resetSubmitting ? "提交中…" : "确认修改"}
+                  </Button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   )
 }

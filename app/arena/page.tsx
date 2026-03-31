@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Orbitron } from "next/font/google"
 
 import { CinematicBlackHole } from "@/src/components/CinematicBlackHole"
+import { LoopingBgmControl } from "@/src/components/audio/LoopingBgmControl"
 import { apiV1BaseUrl } from "@/src/config/public-env"
 import { useMobileGameViewport } from "@/src/hooks/useMobileGameViewport"
 import { useGameStore } from "@/src/store/useGameStore"
@@ -22,6 +23,7 @@ export default function ArenaPage() {
   const [p1Status, setP1Status] = React.useState({ hp: 100, energy: 0 })
   const [p2Status, setP2Status] = React.useState({ hp: 100, energy: 0 })
   const [countdown, setCountdown] = React.useState<number | string | null>(null)
+  const [loadingProgress, setLoadingProgress] = React.useState(8)
   // ===== 新增代码 START =====
   // 修改内容：新增对局结算状态，用于控制结算遮罩 UI
   // 修改原因：需要在收到 Godot 的 game_over 后展示胜负并保持 4 秒后回大厅
@@ -187,6 +189,21 @@ export default function ArenaPage() {
 
   React.useEffect(() => {
     if (isSceneReady) {
+      setLoadingProgress(100)
+      return
+    }
+    const timer = window.setInterval(() => {
+      setLoadingProgress((prev) => {
+        if (prev >= 92) return prev
+        const step = prev < 40 ? 4 : prev < 72 ? 2 : 1
+        return Math.min(92, prev + step)
+      })
+    }, 240)
+    return () => window.clearInterval(timer)
+  }, [isSceneReady])
+
+  React.useEffect(() => {
+    if (isSceneReady) {
       setCountdown(3)
       let count = 3
       const interval = setInterval(() => {
@@ -280,13 +297,35 @@ export default function ArenaPage() {
       {!isSceneReady && (
         <div className="relative z-10 flex h-full w-full items-center justify-center">
           <div className="w-full max-w-2xl px-6">
-            <div className="mx-auto rounded-2xl border border-white/10 bg-black/45 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_0_90px_rgba(142,45,226,0.14)] backdrop-blur">
+            <div className="mx-auto rounded-[28px] border border-white/20 bg-[linear-gradient(155deg,rgba(255,255,255,0.16),rgba(255,255,255,0.03))] p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
               <div className={[orbitron.className, "text-center"].join(" ")}>
-                <div className="text-xs tracking-[0.35em] text-white/50">ASTER NOVA</div>
-                <div className="mt-3 text-2xl font-semibold tracking-tight text-cyan-100 drop-shadow-[0_0_18px_rgba(142,45,226,0.20)]">
-                  ASTERNOVA 核心引擎启动中…
+                <div className="text-[11px] tracking-[0.38em] text-white/55">ASTER NOVA</div>
+                <div className="mt-3 text-2xl font-semibold tracking-tight text-white drop-shadow-[0_0_24px_rgba(255,255,255,0.14)]">
+                  正在进入战场
                 </div>
-                <div className="mt-4 text-sm text-white/65">正在建立神经链路，请稍候...</div>
+                <div className="mt-3 text-sm text-white/68">
+                  {loadingProgress < 35
+                    ? "同步战场会话..."
+                    : loadingProgress < 70
+                      ? "加载地图与资源..."
+                      : "连接对战引擎..."}
+                </div>
+
+                <div className="mx-auto mt-6 w-full max-w-xl">
+                  <div className="h-2.5 overflow-hidden rounded-full border border-white/20 bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-[linear-gradient(90deg,rgba(255,255,255,0.85),rgba(167,243,208,0.92),rgba(147,197,253,0.9))] transition-[width] duration-300 ease-out"
+                      style={{ width: `${loadingProgress}%`, boxShadow: "0 0 24px rgba(167,243,208,0.35)" }}
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-[11px] tracking-[0.14em] text-white/55">
+                    <span>PREPARING</span>
+                    <span>{loadingProgress}%</span>
+                  </div>
+                </div>
+
+                <div className="mx-auto mt-5 h-px w-full max-w-xl bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                <div className="mt-4 text-xs text-white/55">建议保持当前页面，加载完成后将自动开始</div>
               </div>
             </div>
           </div>
@@ -561,6 +600,7 @@ export default function ArenaPage() {
         </div>
       )}
       {/* ===== 新增代码 END ===== */}
+      <LoopingBgmControl src="/audio/games/arena/Untitled.mp3" storageKey="bgm-volume:arena" />
     </div>
   )
 }

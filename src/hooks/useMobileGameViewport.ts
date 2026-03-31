@@ -36,10 +36,16 @@ export type MobileGameViewport = {
 /** 尝试锁定横屏（部分 Android Chrome 在用户手势后可用；iOS 通常无效，需配合 CSS 旋转壳） */
 export function tryLockLandscapeOrientation(): void {
   if (typeof window === "undefined") return
-  const ori = screen.orientation as ScreenOrientation & { lock?: (o: OrientationLockType) => Promise<void> }
-  void ori?.lock?.("landscape-primary").catch(() => {
-    /* unsupported or not allowed */
-  })
+  try {
+    const win = window as Window & { screen?: Screen & { orientation?: ScreenOrientation & { lock?: (o: OrientationLockType) => Promise<void> } } }
+    const ori = win.screen?.orientation
+    if (!ori?.lock) return
+    void ori.lock("landscape-primary").catch(() => {
+      /* unsupported or not allowed */
+    })
+  } catch {
+    /* ignore unsupported env */
+  }
 }
 
 /**
@@ -49,10 +55,15 @@ export function useMobileGameViewport(): MobileGameViewport {
   const [isMobile, setIsMobile] = React.useState(false)
   const [isPortrait, setIsPortrait] = React.useState(false)
 
-  React.useLayoutEffect(() => {
+  React.useEffect(() => {
     const sync = () => {
-      setIsMobile(detectMobileClient())
-      setIsPortrait(isPortraitViewport())
+      try {
+        setIsMobile(detectMobileClient())
+        setIsPortrait(isPortraitViewport())
+      } catch {
+        setIsMobile(false)
+        setIsPortrait(false)
+      }
     }
 
     sync()
@@ -61,12 +72,16 @@ export function useMobileGameViewport(): MobileGameViewport {
     window.addEventListener("orientationchange", sync)
 
     const mql = typeof window.matchMedia === "function" ? window.matchMedia("(orientation: portrait)") : null
-    mql?.addEventListener("change", sync)
+    const mqlAny = mql as (MediaQueryList & { addListener?: (cb: (e: MediaQueryListEvent) => void) => void; removeListener?: (cb: (e: MediaQueryListEvent) => void) => void }) | null
+
+    if (mqlAny?.addEventListener) mqlAny.addEventListener("change", sync)
+    else if (mqlAny?.addListener) mqlAny.addListener(sync)
 
     return () => {
       window.removeEventListener("resize", sync)
       window.removeEventListener("orientationchange", sync)
-      mql?.removeEventListener("change", sync)
+      if (mqlAny?.removeEventListener) mqlAny.removeEventListener("change", sync)
+      else if (mqlAny?.removeListener) mqlAny.removeListener(sync)
     }
   }, [])
 

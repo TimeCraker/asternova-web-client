@@ -1,5 +1,5 @@
 /**
- * 全局公共 URL：来自根目录 .env.local 的 NEXT_PUBLIC_*（构建时内联）。
+ * 全局公共 URL：来自根目录 .env.development / .env.production 的 NEXT_PUBLIC_*（构建时内联）。
  * 业务代码请从这里取地址，避免散落硬编码。
  */
 const trimTrailingSlash = (value: string) => value.replace(/\/$/, "")

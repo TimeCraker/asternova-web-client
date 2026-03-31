@@ -1,5 +1,5 @@
 import type { Viewport } from "next"
-import { StarDashGame } from "@/src/components/star-dash/StarDashGame"
+import { LetsRunningPageClient } from "@/src/components/game-pages/LetsRunningPageClient"
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -8,5 +8,5 @@ export const viewport: Viewport = {
 }
 
 export default function LetsRunningPage() {
-  return <StarDashGame />
+  return <LetsRunningPageClient />
 }

@@ -152,8 +152,9 @@ body {
 .mobile-game-landscape-fill > * {
   box-sizing: border-box;
   height: 100% !important;
-  min-height: 100% !important;
+  min-height: 0 !important;
   width: 100% !important;
+  min-width: 0 !important;
 }
 
 /* 大厅 · 小游戏卡片「进入」微光呼吸 */

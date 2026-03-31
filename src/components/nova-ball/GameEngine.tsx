@@ -14,6 +14,7 @@ import Matter, {
   World,
 } from "matter-js"
 
+import { LoopingBgmControl } from "@/src/components/audio/LoopingBgmControl"
 import styles from "./GameEngine.module.css"
 
 const WIDTH = 1180
@@ -119,6 +120,7 @@ export function GameEngine() {
   const [gameOverStats, setGameOverStats] = React.useState<{ levels: number; score: number } | null>(null)
   const [rulesModalOpen, setRulesModalOpen] = React.useState(true)
   const [dontShowRulesAgain, setDontShowRulesAgain] = React.useState(false)
+  const [fatalRuntimeError, setFatalRuntimeError] = React.useState<Error | null>(null)
 
   const syncPhase = React.useCallback((next: Phase) => {
     phaseRef.current = next
@@ -443,28 +445,28 @@ export function GameEngine() {
 
   React.useEffect(() => {
     if (!worldRef.current) return
+    try {
+      const engine = Engine.create({ gravity: { x: 0, y: 1.02 } })
+      engineRef.current = engine
 
-    const engine = Engine.create({ gravity: { x: 0, y: 1.02 } })
-    engineRef.current = engine
+      const render = Render.create({
+        element: worldRef.current,
+        engine,
+        options: {
+          width: WIDTH,
+          height: HEIGHT,
+          wireframes: false,
+          background: "transparent",
+          pixelRatio: window.devicePixelRatio || 1,
+        },
+      })
+      renderRef.current = render
+      render.canvas.style.width = "100%"
+      render.canvas.style.height = "100%"
+      render.canvas.style.display = "block"
 
-    const render = Render.create({
-      element: worldRef.current,
-      engine,
-      options: {
-        width: WIDTH,
-        height: HEIGHT,
-        wireframes: false,
-        background: "transparent",
-        pixelRatio: window.devicePixelRatio || 1,
-      },
-    })
-    renderRef.current = render
-    render.canvas.style.width = "100%"
-    render.canvas.style.height = "100%"
-    render.canvas.style.display = "block"
-
-    const runner = Runner.create()
-    runnerRef.current = runner
+      const runner = Runner.create()
+      runnerRef.current = runner
 
     const boundaries = [
       Bodies.rectangle(WIDTH / 2, HEIGHT + 40, WIDTH + 120, 80, {
@@ -678,8 +680,8 @@ export function GameEngine() {
       }
     })
 
-    Render.run(render)
-    Runner.run(runner, engine)
+      Render.run(render)
+      Runner.run(runner, engine)
 
     clearRoundBodies()
     syncScore(0)
@@ -692,17 +694,22 @@ export function GameEngine() {
     generateObstacleField()
     createBall()
 
-    return () => {
-      Render.stop(render)
-      Runner.stop(runner)
-      Composite.clear(engine.world, false)
-      Engine.clear(engine)
-      if (render.canvas.parentNode) {
-        render.canvas.parentNode.removeChild(render.canvas)
+      return () => {
+        Render.stop(render)
+        Runner.stop(runner)
+        Composite.clear(engine.world, false)
+        Engine.clear(engine)
+        if (render.canvas.parentNode) {
+          render.canvas.parentNode.removeChild(render.canvas)
+        }
+        // Clear texture cache for hot reload safety
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(render as any).textures = {}
       }
-      // Clear texture cache for hot reload safety
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(render as any).textures = {}
+    }
+    catch (err) {
+      setFatalRuntimeError(err instanceof Error ? err : new Error(String(err)))
+      return
     }
     // 仅挂载时创建引擎。若依赖 clearanceRate 等会变的回调，effect 会反复 teardown，
     // 导致 syncLevel(1) 再次执行，表现为「打一枪就回到第一关」。
@@ -752,6 +759,32 @@ export function GameEngine() {
     setClearanceRate(0)
     generateObstacleField()
     createBall()
+  }
+
+  if (fatalRuntimeError) {
+    return (
+      <div className={styles.shell}>
+        <div className={styles.overlay}>
+          <div className={styles.panel}>
+            <div className={styles.panelTitle}>游戏初始化失败</div>
+            <div className={styles.panelLine} style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {fatalRuntimeError.message}
+            </div>
+            <div className={styles.panelLine} style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, opacity: 0.85 }}>
+              {fatalRuntimeError.stack || "(no stack trace)"}
+            </div>
+            <div className={styles.panelActions}>
+              <button type="button" className={`${styles.actionBtn} ${styles.actionPrimary}`} onClick={() => router.refresh()}>
+                重试
+              </button>
+              <button type="button" className={`${styles.actionBtn} ${styles.actionSecondary}`} onClick={() => router.push("/lobby")}>
+                返回大厅
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -911,6 +944,7 @@ export function GameEngine() {
           </div>
         ) : null}
       </div>
+      <LoopingBgmControl src="/audio/games/shoot-them-all/Untitled.mp3" storageKey="bgm-volume:shoot-them-all" />
     </div>
   )
 }
