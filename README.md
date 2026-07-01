@@ -1,4 +1,6 @@
------
+﻿-----
+
+[![CI](https://github.com/TimeCraker/asternova-web-client/actions/workflows/ci.yml/badge.svg)](https://github.com/TimeCraker/asternova-web-client/actions/workflows/ci.yml)
 
 # 🌌 AsterNova Web Client (Game Shell)
 
