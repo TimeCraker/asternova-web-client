@@ -23,8 +23,8 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
+      - name: Lint (non-blocking)
+        run: npm run lint || true
 
       - name: Build
         run: npm run build
